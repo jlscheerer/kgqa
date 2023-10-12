@@ -25,3 +25,6 @@ embeddings:
 # Invertible Predicates
 predicates:
   directory: "./data/predicates"
+  non_invertible:
+    rel_threshold: 0.01
+    abs_threshold: 1000

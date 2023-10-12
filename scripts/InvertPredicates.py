@@ -49,12 +49,12 @@ def _compute_invertible_predicates():
             pid = db.relations.label_to_pid[label]
 
             total = pid_to_total.get(pid, 0)
-            invertible = pid_to_ninv.get(pid, 0)
+            non_invertible = pid_to_ninv.get(pid, 0)
 
             predicates[pid] = {
                 "label": label,
                 "total": total,
-                "non_invertible": invertible,
+                "non_invertible": non_invertible,
             }
 
         with open(
@@ -62,6 +62,89 @@ def _compute_invertible_predicates():
         ) as file:
             json.dump(predicates, file)
 
+        sp.ok("✔ ")
+
+
+def _construct_inv_predicate_table():
+    config = Config()
+    db = Database()
+
+    with yaspin(text="Determining Invertible Predicates...") as sp:
+        with open(
+            config.file_in_directory("predicates", "predicate_info.json"), "r"
+        ) as file:
+            predicates = json.load(file)
+
+        NON_INVERTIBLE_REL_THRESHOLD = config["predicates"]["non_invertible"][
+            "rel_threshold"
+        ]
+        NON_INVERTIBLE_ABS_THRESHOLD = config["predicates"]["non_invertible"][
+            "abs_threshold"
+        ]
+
+        non_invertible_predicates, invertible_predicates = [], []
+        for pid, data in predicates.items():
+            total = data["total"]
+            non_invertible = data["non_invertible"]
+            if (
+                non_invertible > NON_INVERTIBLE_REL_THRESHOLD * total
+                or non_invertible > NON_INVERTIBLE_ABS_THRESHOLD
+            ):
+                non_invertible_predicates.append(pid)
+            else:
+                invertible_predicates.append(pid)
+
+        sp.ok("✔ ")
+
+    print(f"Counting {len(invertible_predicates)} / {len(predicates)} as invertible.")
+
+    with yaspin(text="Populating claims_5m_inv Table...") as sp:
+        db.execute("DROP TABLE IF EXISTS claims_5m_inv")
+        db.execute(
+            "CREATE TABLE claims_5m_inv AS (SELECT *, False as inverse FROM claims_5m);"
+        )
+        sp.ok("✔ ")
+
+    with yaspin(text="Populating claims_5m_inv Table (Inverted Predicates)...") as sp:
+        escaped_invertible_predicates = [f"'{pid}'" for pid in invertible_predicates]
+        sql = f"""
+        INSERT INTO claims_5m_inv
+        SELECT datavalue_entity AS entity_id, id, type, rank, snaktype,
+               property, datavalue_string, entity_id AS datavalue_entity,
+               datavalue_date, datavalue_type, datatype, True as inverse
+        FROM claims_5m
+        WHERE property IN ({', '.join(escaped_invertible_predicates)});
+        """
+        db.execute(sql)
+        sp.ok("✔ ")
+
+    db.commit()
+
+
+def _construct_inv_predicate_idx():
+    db = Database()
+
+    with yaspin(text="Constructing Indexes for claims_5m_inv Table...") as sp:
+        db.execute(
+            "CREATE INDEX idx_claims_5m_inv_datavalue_entity ON claims_5m_inv (datavalue_entity);"
+        )
+        db.execute(
+            "CREATE INDEX idx_claims_5m_inv_entity_id ON claims_5m_inv (entity_id);"
+        )
+        db.execute(
+            "CREATE INDEX idx_claims_5m_inv_property ON claims_5m_inv (property);"
+        )
+
+        db.commit()
+
+        sp.ok("✔ ")
+
 
 def accept(options):
-    _compute_invertible_predicates()
+    if not options.get("skip_count_predicates", False):
+        _compute_invertible_predicates()
+
+    if not options.get("skip_create_table", False):
+        _construct_inv_predicate_table()
+
+    _construct_inv_predicate_idx()

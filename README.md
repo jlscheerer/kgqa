@@ -65,7 +65,7 @@ pip3 install -r requirements.txt
 python3 setup.py ComputeEmbeddings
 ```
 
-8. Finally, populate the `claims` table with *invertible* predicates by run supplied script.
+8. Finally, populate the `claims` table with *invertible* predicates by running the supplied script.
 
 ```sh
 python3 setup.py InvertPredicates

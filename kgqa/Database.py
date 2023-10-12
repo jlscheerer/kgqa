@@ -46,6 +46,13 @@ class Database(metaclass=Singleton):
     def cursor(self):
         return self._conn.cursor()
 
+    def execute(self, sql):
+        cursor = self.cursor()
+        cursor.execute(sql)
+
+    def commit(self):
+        self._conn.commit()
+
     def fetchall(self, sql):
         cursor = self.cursor()
         cursor.execute(sql)
