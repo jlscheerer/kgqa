@@ -1,0 +1,27 @@
+# MatchingUtils
+NumTopQID: 10
+NumTopPID: 5
+NumTopAliases: 10
+
+# Postgres Database Configuration
+psql:
+  db: "wikidata"
+  user: <<TODO_ADD_PSQL_USERNAME_HERE>>
+  pwd: <<TODO_ADD_PSQL_PASSWORD_HERE>>
+
+language_model:
+  openai_api_key: <<TODO_ADD_OPENAI_API_KEY_HERE>>
+
+# Label Embeddings
+embeddings:
+  directory: "./data/embeddings"
+  alias_count: 20000000 
+  batch_size:  100000   # Number of embeddings to store per file.
+  count:       2000000  # Total number of embeddings to compute.
+  transformer:
+    model: "all-MiniLM-L6-v2"
+    device: "cpu"
+
+# Invertible Predicates
+predicates:
+  directory: "./data/predicates"

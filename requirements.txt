@@ -1,0 +1,9 @@
+psycopg2
+PyYAML
+numpy
+sentence_transformers
+yaspin
+tqdm
+faiss-cpu
+pandas
+openai
