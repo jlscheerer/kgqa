@@ -1,13 +1,16 @@
 import traceback
 import time
+
 from typing import List
 from yaspin import yaspin
+from tabulate import tabulate
 
 from kgqa.AbstractQueryGraph import aqg2wqg, query2aqg
 from kgqa.SQLUtils import wqg2sql
 from kgqa.QueryParser import QueryParser
 from kgqa.MatchingUtils import compute_similar_entity_ids
 from kgqa.FaissIndex import FaissIndexDirectory
+from kgqa.Database import Database
 
 
 def _handle_user_query(query: str):
@@ -42,13 +45,16 @@ def _handle_user_help() -> bool:
 
 
 def _handle_builtin_entity(args: List[str]) -> bool:
+    db = Database()
     name = " ".join(args)
-    faiss = FaissIndexDirectory().labels
-    pids, scores = compute_similar_entity_ids(name)
-    for pid, score in zip(pids, scores):
-        label = faiss.label_for_id(pid)
-        # TODO(jlscheerer) We should also retrieve the description for the matches.
-        print(label, pid, score)
+    with yaspin(text=f'Scanning for entities matching "{name}"...'):
+        faiss = FaissIndexDirectory().labels
+        pids, scores = compute_similar_entity_ids(name)
+        results = [
+            (pid, score, faiss.label_for_id(pid), db.get_description_for_id(pid))
+            for pid, score in zip(pids, scores)
+        ]
+    print(tabulate(results, ["PID", "Score", "Label", "Description"]))
     return True
 
 

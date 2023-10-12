@@ -120,3 +120,5 @@ CREATE INDEX idx_claims_property ON claims (property);
 CREATE INDEX idx_qualifiers_claim_id ON qualifiers (claim_id);
 CREATE INDEX idx_qualifiers_datavalue_entity ON qualifiers (datavalue_entity);
 CREATE INDEX idx_qualifiers_property ON qualifiers (property);
+
+CREATE INDEX idx_descriptions_id ON descriptions (id);

@@ -78,6 +78,11 @@ class Database(metaclass=Singleton):
     def get_pid_to_title(self, pid):
         raise AssertionError("NYI")
 
+    def get_description_for_id(self, id):
+        return self.fetchall(
+            f"SELECT value FROM descriptions WHERE id = '{id}' AND language = 'en'"
+        )[0][0]
+
     def __del__(self):
         if self._conn is not None:
             self._conn.close()
