@@ -8,3 +8,4 @@ faiss-cpu
 pandas
 openai
 tabulate
+pandas

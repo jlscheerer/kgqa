@@ -1,5 +1,6 @@
 import traceback
-import time
+import pydoc
+import readline
 
 from typing import List
 from yaspin import yaspin
@@ -8,9 +9,14 @@ from tabulate import tabulate
 from kgqa.AbstractQueryGraph import aqg2wqg, query2aqg
 from kgqa.SQLUtils import wqg2sql
 from kgqa.QueryParser import QueryParser
+from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entity_ids
 from kgqa.FaissIndex import FaissIndexDirectory
 from kgqa.Database import Database
+
+
+def _display_query_results(results, columns):
+    pydoc.pipepager(tabulate(results, columns, tablefmt="orgtbl"), cmd="less -R")
 
 
 def _handle_user_query(query: str):
@@ -27,10 +33,10 @@ def _handle_user_query(query: str):
         with yaspin(text="Emitting SQL Code..."):
             sql, stats = wqg2sql(wqg, stats)
 
-        print(sql)
-
         with yaspin(text="Executing Query on Wikidata..."):
-            time.sleep(3)
+            results, columns = run_and_rank(sql, stats, wqg)
+
+        _display_query_results(results, columns)
     except Exception as err:
         print(f"Error: {err}")
         traceback.print_exc()

@@ -53,9 +53,11 @@ class Database(metaclass=Singleton):
     def commit(self):
         self._conn.commit()
 
-    def fetchall(self, sql):
+    def fetchall(self, sql, return_column_names=False):
         cursor = self.cursor()
         cursor.execute(sql)
+        if return_column_names:
+            return cursor.fetchall(), [column.name for column in cursor.description]
         return cursor.fetchall()
 
     def fetchmany(self, sql, batch_size):
