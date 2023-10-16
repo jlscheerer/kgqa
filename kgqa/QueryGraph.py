@@ -24,9 +24,26 @@ class QueryStatistics:
     pid2scores: Dict[Any, Any] = field(default_factory=dict)
     qid2scores: Dict[Any, Any] = field(default_factory=dict)
 
+    num_predicates: int = -1
+    num_anchors: int = -1
+    num_heads: int = -1
+    column_names: List[str] = field(default_factory=list)
+
     def set_scores(self, pid2scores, qid2scores) -> None:
         self.pid2scores = pid2scores
         self.qid2scores = qid2scores
+
+    def add_nums_and_cols(
+        self,
+        num_predicates: int,
+        num_anchors: int,
+        num_heads: int,
+        column_names: List[str],
+    ) -> None:
+        self.num_predicates = num_predicates
+        self.num_anchors = num_anchors
+        self.num_heads = num_heads
+        self.column_names = column_names
 
 
 @dataclass
@@ -57,6 +74,16 @@ class QueryGraphNode:
     is_free: bool
     value: ArgumentType
 
+    def to_str(self) -> str:
+        if isinstance(self.value, StringConstant):
+            return self.value.value
+        elif isinstance(self.value, Variable):
+            return f"Variable({self.value.name})"
+
+        # TODO(jlscheerer) Eventually we need to handle different types here.
+        print(self.value)
+        assert False
+
 
 @dataclass
 class QueryGraphEdge:
@@ -65,6 +92,9 @@ class QueryGraphEdge:
 
     def set_matched_pids(self, pids: List[str]) -> None:
         self.matched_pids = pids
+
+    def get_matched_pids(self) -> List[str]:
+        return self.matched_pids
 
 
 @dataclass
