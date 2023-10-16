@@ -100,6 +100,14 @@ class IDConstant(Constant):
     def __repr__(self) -> str:
         return f"{self.annotation.value}IDConstant({self.value})"
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, IDConstant):
+            return False
+        return self.value == other.value and self.annotation == other.annotation
+
+    def __hash__(self):
+        return hash(self.source_name())
+
 
 class AggregationType(Enum):
     COUNT = auto()
@@ -516,8 +524,9 @@ class QueryParser:
                 # We have an "annotated" identifier, e.g., !Q76 / ?Q76
                 ident = self._pop_require_token()
                 if ident.token_type != TokenType.IDENTIFIER:
-                    raise AssertionError(
-                        f"expected {TokenType.IDENTIFIER} but got {ident.token_type}"
+                    raise QueryParserException(
+                        ident,
+                        f"expected {TokenType.IDENTIFIER} but got {ident.token_type}",
                     )
                 arguments.append(self._as_id_constant(annotation=token, constant=ident))
             elif token.token_type == TokenType.IDENTIFIER:

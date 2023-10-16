@@ -2,7 +2,7 @@ import abc
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, cast
+from typing import Any, Dict, List, Set, Tuple, cast, reveal_type
 from typing_extensions import override
 
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
@@ -79,9 +79,10 @@ class QueryGraphNode:
             return self.value.value
         elif isinstance(self.value, Variable):
             return f"Variable({self.value.name})"
+        elif isinstance(self.value, IDConstant):
+            return f"IDConstant({self.value.value})"
 
         # TODO(jlscheerer) Eventually we need to handle different types here.
-        print(self.value)
         assert False
 
 
@@ -216,6 +217,8 @@ def _match_entities(wqg: ExecutableQueryGraph):
             # Temporary assumption. TODO(jlscheerer) handle different constants.
             if isinstance(node.value, StringConstant):
                 qids, scores = compute_similar_entity_ids(node.value.value)
+            elif isinstance(node.value, IDConstant):
+                qids, scores = [node.value.value], [1.0]
             else:
                 assert False
             scores = [round(x, 2) for x in scores]

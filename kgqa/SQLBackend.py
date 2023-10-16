@@ -171,7 +171,6 @@ class SQL_IR:
 
     # TODO(jlscheerer) This is not necessary, and should be removed from the backend(s).
     def join_labels(self, orig_query: str, col_names: List[str]) -> str:
-        print(col_names)
         selections = ", ".join(
             [
                 f'oq."{cname}", l{i}.value AS "{strip_qid_if_needed(cname)} (label)"'
