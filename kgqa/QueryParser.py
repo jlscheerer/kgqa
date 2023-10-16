@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import List, Union
+from typing import List, Optional, Tuple, Union
 from .QueryLexer import (
     Identifier,
     LiteralToken,
@@ -19,13 +19,13 @@ class Variable:
     token: Identifier
     name: str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Variable({self.name})"
 
 
 @dataclass
 class Constant:
-    token: LiteralToken
+    token: Union[LiteralToken, Identifier]
 
 
 @dataclass
@@ -33,7 +33,7 @@ class StringConstant(Constant):
     token: StringLiteral
     value: str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Constant('{self.value}')"
 
 
@@ -42,8 +42,23 @@ class NumericConstant(Constant):
     token: NumericLiteral
     value: Union[int, float]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Constant({self.value})"
+
+
+class AnnotationType(Enum):
+    BANG = "!"
+    OPT = "?"
+
+
+@dataclass
+class IDConstant(Constant):
+    token: Identifier
+    annotation: AnnotationType
+    value: str
+
+    def __repr__(self) -> str:
+        return f"{self.annotation.value}IDConstant({self.value})"
 
 
 class AggregationType(Enum):
@@ -59,7 +74,7 @@ class Aggregation:
     var: Variable
     type_: AggregationType
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.type_.name}({self.var})"
 
 
@@ -74,13 +89,17 @@ class QueryAtom:
 
 @dataclass
 class Predicate(QueryAtom):
-    predicate: Variable
+    predicate: Union[IDConstant, Variable]
     arguments: List[Union[Variable, Constant]]
 
-    def __repr__(self):
-        return (
-            f"{self.predicate.name}({', '.join([str(arg) for arg in self.arguments])})"
-        )
+    def __repr__(self) -> str:
+        if isinstance(self.predicate, Variable):
+            return f"{self.predicate.name}({', '.join([str(arg) for arg in self.arguments])})"
+        else:
+            assert isinstance(self.predicate, IDConstant)
+            return (
+                f"{self.predicate}({', '.join([str(arg) for arg in self.arguments])}))"
+            )
 
 
 class FilterOp(Enum):
@@ -98,14 +117,16 @@ class Filter(QueryAtom):
     op: FilterOp
     rhs: Constant
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.lhs} {self.op.value} {self.rhs}"
 
 
 @dataclass
 class ParsedQuery:
     head: QueryHead
-    body: List[QueryAtom]
+
+    clauses: List[Predicate]
+    filters: List[Filter]
 
 
 class QueryParserException(Exception):
@@ -119,15 +140,15 @@ class QueryParser:
     _cursor: int
     _eof: int
 
-    def parse(self, query: str):
+    def parse(self, query: str) -> ParsedQuery:
         self._tokens = list(QueryLexer(query))
         self._cursor = 0
         self._eof = len(query)
         head: QueryHead = []
         if self._check_contains_colon():
             head = self._parse_head()
-        body = self._parse_body()
-        return ParsedQuery(head=head, body=body)
+        clauses, filters = self._parse_body()
+        return ParsedQuery(head=head, clauses=clauses, filters=filters)
 
     def _parse_head(self) -> QueryHead:
         token = self._pop_token()
@@ -171,8 +192,9 @@ class QueryParser:
             )
         return [item]
 
-    def _parse_body(self) -> List[QueryAtom]:
-        atoms: List[QueryAtom] = []
+    def _parse_body(self) -> Tuple[List[Predicate], List[Filter]]:
+        clauses: List[Predicate] = []
+        filters: List[Filter] = []
         while True:
             atom = self._parse_atom()
             if atom is None:
@@ -180,7 +202,13 @@ class QueryParser:
                     SourceLocation(begin=self._eof, end=self._eof + 1),
                     "missing query body",
                 )
-            atoms.append(atom)
+
+            if isinstance(atom, Predicate):
+                clauses.append(atom)
+            else:
+                assert isinstance(atom, Filter)
+                filters.append(atom)
+
             if self._curr_token() is None:
                 break
             token = self._pop_require_token()
@@ -188,12 +216,18 @@ class QueryParser:
                 raise QueryParserException(
                     token, f"unexpected {token.token_type} in query body"
                 )
-        return atoms
+        return clauses, filters
 
-    def _parse_atom(self):
+    def _parse_atom(self) -> Optional[QueryAtom]:
         ident = self._pop_token()
         if ident is None:
             return None
+
+        # We have an annotated predicate, e.g., !P17 / ?P17
+        annotation: Optional[Token] = None
+        if ident.token_type in [TokenType.EXCLAMATION_MARK, TokenType.QUESTION_MARK]:
+            annotation = ident
+            ident = self._pop_require_token()
 
         if ident.token_type != TokenType.IDENTIFIER:
             raise QueryParserException(
@@ -202,10 +236,19 @@ class QueryParser:
         token = self._require_token()
         if token.token_type == TokenType.OPEN_PAREN:
             arguments = self._parse_arguments()
-            return Predicate(
-                predicate=Variable(token=ident, name=ident.name), arguments=arguments
-            )
+            predicate: Union[Variable, IDConstant]
+            if annotation is None:
+                predicate = Variable(token=ident, name=ident.name)
+            else:
+                predicate = self._as_id_constant(annotation=annotation, constant=ident)
+            return Predicate(predicate=predicate, arguments=arguments)
         elif token.token_type == TokenType.COMPARATOR:
+            # We cannot have annotated predicates with comparisons.
+            if annotation is not None:
+                raise QueryParserException(
+                    annotation, f"unexpected {annotation.token_type} in comparison"
+                )
+
             op = self._pop_require_token()
             if op.token_type != TokenType.COMPARATOR:
                 raise QueryParserException(
@@ -236,10 +279,22 @@ class QueryParser:
             if "." in token.value:
                 return NumericConstant(token=token, value=float(token.value))
             return NumericConstant(token=token, value=int(token.value))
-        # this represents an illegal invokation of _as_constant()
+        # this represents an illegal invocation of _as_constant()
         raise AssertionError()
 
-    def _parse_arguments(self):
+    def _as_id_constant(self, annotation: Token, constant: Identifier) -> IDConstant:
+        if annotation.token_type == TokenType.EXCLAMATION_MARK:
+            return IDConstant(
+                token=constant, annotation=AnnotationType.BANG, value=constant.name
+            )
+        elif annotation.token_type == TokenType.QUESTION_MARK:
+            return IDConstant(
+                token=constant, annotation=AnnotationType.OPT, value=constant.name
+            )
+        # this represents an illegal invocation of _as_id_constant()
+        raise AssertionError()
+
+    def _parse_arguments(self) -> List[Union[Variable, Constant]]:
         self._check_token(TokenType.OPEN_PAREN, should_raise=True)
 
         arguments: List[Union[Variable, Constant]] = []
@@ -253,7 +308,18 @@ class QueryParser:
             if token.token_type == TokenType.CLOSE_PAREN:
                 return arguments
 
-            if token.token_type == TokenType.IDENTIFIER:
+            if token.token_type in [
+                TokenType.EXCLAMATION_MARK,
+                TokenType.QUESTION_MARK,
+            ]:
+                # We have an "annotated" identifier, e.g., !Q76 / ?Q76
+                ident = self._pop_require_token()
+                if ident.token_type != TokenType.IDENTIFIER:
+                    raise AssertionError(
+                        f"expected {TokenType.IDENTIFIER} but got {ident.token_type}"
+                    )
+                arguments.append(self._as_id_constant(annotation=token, constant=ident))
+            elif token.token_type == TokenType.IDENTIFIER:
                 arguments.append(Variable(token=token, name=token.name))
             elif token.token_type in [
                 TokenType.STRING_LITERAL,
@@ -279,7 +345,7 @@ class QueryParser:
                     token, f"unexpected {token.token_type} in argument list"
                 )
 
-    def _check_contains_colon(self):
+    def _check_contains_colon(self) -> bool:
         colon_tokens = [
             *filter(lambda token: token.token_type == TokenType.COLON, self._tokens)
         ]
@@ -287,15 +353,15 @@ class QueryParser:
             raise QueryParserException(colon_tokens[1], "extranous ':' in query")
         return len(colon_tokens) == 1
 
-    def _advance_cursor(self, amount=1):
+    def _advance_cursor(self, amount=1) -> None:
         self._cursor += amount
 
-    def _token_at(self, cursor):
+    def _token_at(self, cursor) -> Optional[Token]:
         if cursor >= len(self._tokens):
             return None
         return self._tokens[cursor]
 
-    def _require_token(self):
+    def _require_token(self) -> Token:
         token = self._curr_token()
         if token is None:
             raise QueryLexerException(
@@ -304,10 +370,10 @@ class QueryParser:
             )
         return token
 
-    def _curr_token(self):
+    def _curr_token(self) -> Optional[Token]:
         return self._token_at(self._cursor)
 
-    def _pop_require_token(self):
+    def _pop_require_token(self) -> Token:
         token = self._pop_token()
         if token is None:
             raise QueryLexerException(
@@ -316,12 +382,12 @@ class QueryParser:
             )
         return token
 
-    def _pop_token(self):
+    def _pop_token(self) -> Optional[Token]:
         token = self._curr_token()
         self._advance_cursor()
         return token
 
-    def _check_token(self, token_type: TokenType, should_raise: bool = False):
+    def _check_token(self, token_type: TokenType, should_raise: bool = False) -> bool:
         token = self._pop_token()
         if token is None:
             if should_raise:
