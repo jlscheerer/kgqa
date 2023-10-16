@@ -51,6 +51,14 @@ class StringConstant(Constant):
     def __repr__(self) -> str:
         return f"Constant('{self.value}')"
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, StringConstant):
+            return False
+        return self.value == other.value
+
+    def __hash__(self):
+        return hash(self.value)
+
 
 @dataclass
 class NumericConstant(Constant):
@@ -59,6 +67,14 @@ class NumericConstant(Constant):
 
     def __repr__(self) -> str:
         return f"Constant({self.value})"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, NumericConstant):
+            return False
+        return self.value == other.value
+
+    def __hash__(self):
+        return hash(self.value)
 
 
 class AnnotationType(Enum):
@@ -128,10 +144,14 @@ class QueryAtom:
     pass
 
 
+PredicateType = Union[IDConstant, Variable]
+ArgumentType = Union[Variable, Constant]
+
+
 @dataclass
 class QueryClause(QueryAtom):
-    predicate: Union[IDConstant, Variable]
-    arguments: List[Union[Variable, Constant]]
+    predicate: PredicateType
+    arguments: List[ArgumentType]
 
     def __repr__(self) -> str:
         if isinstance(self.predicate, Variable):
@@ -168,6 +188,14 @@ class ParsedQuery:
 
     clauses: List[QueryClause]
     filters: List[QueryFilter]
+
+    def spo(self) -> List[Tuple[ArgumentType, PredicateType, ArgumentType]]:
+        spo: List[Tuple[ArgumentType, PredicateType, ArgumentType]] = []
+        for clause in self.clauses:
+            if len(clause.arguments) != 2:
+                raise AssertionError()
+            spo.append((clause.arguments[0], clause.predicate, clause.arguments[1]))
+        return spo
 
 
 class QueryParserException(Exception):
@@ -312,6 +340,8 @@ class QueryParser:
                         raise QueryParserException(
                             argument.token, "unsupported quote type for argument"
                         )
+
+        # TODO(jlscheerer) NumericLiterals are not supported yet.
 
         return True
 
