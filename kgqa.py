@@ -11,8 +11,8 @@ from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import QueryParser, QueryParserException
 from kgqa.PostProcessing import run_and_rank
-from kgqa.MatchingUtils import compute_similar_entity_ids
-from kgqa.FaissIndex import FaissIndexDirectory
+from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
+from kgqa.FaissIndex import FaissIndex, FaissIndexDirectory
 from kgqa.Database import Database
 from kgqa.SQLBackend import wqg2sql
 
@@ -74,18 +74,26 @@ def _handle_builtin_entity(args: List[str]) -> bool:
     name = " ".join(args)
     with yaspin(text=f'Scanning for entities matching "{name}"...'):
         faiss = FaissIndexDirectory().labels
-        pids, scores = compute_similar_entity_ids(name)
+        qids, scores = compute_similar_entity_ids(name)
+        results = [
+            (qid, score, faiss.label_for_id(qid), db.get_description_for_id(qid))
+            for qid, score in zip(qids, scores)
+        ]
+    print(tabulate(results, ["QID", "Score", "Label", "Description"]))
+    return True
+
+
+def _handle_builtin_predicate(args: List[str]) -> bool:
+    db = Database()
+    name = " ".join(args)
+    with yaspin(text=f'Scanning for predicates matching "{name}..."'):
+        faiss = FaissIndexDirectory().properties
+        pids, scores = compute_similar_predicates(name)
         results = [
             (pid, score, faiss.label_for_id(pid), db.get_description_for_id(pid))
             for pid, score in zip(pids, scores)
         ]
     print(tabulate(results, ["PID", "Score", "Label", "Description"]))
-    return True
-
-
-def _handle_builtin_predicate(args: List[str]) -> bool:
-    # TODO(jlscheerer) Find similar predicates.
-    print(".predicate NYI:", args)
     return True
 
 
