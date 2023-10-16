@@ -1,6 +1,10 @@
 from enum import Enum, auto
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
+from dataclasses import dataclass, field
+import re
+
 from .QueryLexer import (
+    AggregationFunction,
     Identifier,
     LiteralToken,
     NumericLiteral,
@@ -11,7 +15,6 @@ from .QueryLexer import (
     Token,
     TokenType,
 )
-from dataclasses import dataclass
 
 
 @dataclass
@@ -19,8 +22,19 @@ class Variable:
     token: Identifier
     name: str
 
+    def source_name(self) -> str:
+        return self.name
+
     def __repr__(self) -> str:
         return f"Variable({self.name})"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Variable):
+            return False
+        return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 @dataclass
@@ -57,6 +71,9 @@ class IDConstant(Constant):
     annotation: AnnotationType
     value: str
 
+    def source_name(self) -> str:
+        return f"{self.annotation.value}{self.value}"
+
     def __repr__(self) -> str:
         return f"{self.annotation.value}IDConstant({self.value})"
 
@@ -71,6 +88,7 @@ class AggregationType(Enum):
 
 @dataclass
 class Aggregation:
+    token: AggregationFunction
     var: Variable
     type_: AggregationType
 
@@ -79,7 +97,29 @@ class Aggregation:
 
 
 HeadItem = Union[Variable, Aggregation]
-QueryHead = List[HeadItem]
+
+
+@dataclass
+class QueryHead:
+    items: List[HeadItem] = field(default_factory=lambda: [])
+
+    def vars(self) -> List[Variable]:
+        """
+        Returns a list of unique variables occuring in the head, ordered by occurence.
+        """
+        vars: List[Variable] = []
+        for item in self.items:
+            if isinstance(item, Variable):
+                if item not in vars:
+                    vars.append(item)
+            else:
+                assert isinstance(item, Aggregation)
+                if item.var not in vars:
+                    vars.append(item.var)
+        return vars
+
+    def __iter__(self):
+        return self.items.__iter__()
 
 
 @dataclass
@@ -144,11 +184,90 @@ class QueryParser:
         self._tokens = list(QueryLexer(query))
         self._cursor = 0
         self._eof = len(query)
-        head: QueryHead = []
+        head = QueryHead()
         if self._check_contains_colon():
             head = self._parse_head()
         clauses, filters = self._parse_body()
-        return ParsedQuery(head=head, clauses=clauses, filters=filters)
+        pq = ParsedQuery(head=head, clauses=clauses, filters=filters)
+        if not self._validate_query(pq):
+            raise AssertionError()
+        return pq
+
+    def _validate_query(self, pq: ParsedQuery) -> bool:
+        head_vars = pq.head.vars()
+
+        clause_vars: Set[Variable] = set()
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                if isinstance(argument, Variable):
+                    clause_vars.add(argument)
+
+        # Every variable occuring in the head must be bound in the body via a clause.
+        for var in head_vars:
+            if var not in clause_vars:
+                raise QueryParserException(
+                    var.token,
+                    f"unbound variable: {var.source_name()} does not appear in a clause",
+                )
+
+        # Every variable as a filter must be bound in the body via a clause.
+        for filter in pq.filters:
+            if filter.lhs not in clause_vars:
+                raise QueryParserException(
+                    filter.lhs.token,
+                    f"unbound variable: {filter.lhs.source_name()} does not appear in a clause",
+                )
+
+        # Aggregations are not yet supported.
+        for item in pq.head:
+            if isinstance(item, Aggregation):
+                raise QueryParserException(
+                    item.token,
+                    f"aggregation {item.type_.name}(_) not yet supported",
+                )
+
+        # We only support unary/binary predicates
+        for clause in pq.clauses:
+            if len(clause.arguments) == 0:
+                raise QueryParserException(
+                    clause.predicate.token, "unsupported nullary predicate"
+                )
+            elif len(clause.arguments) > 2:
+                raise QueryLexerException(
+                    SourceLocation(
+                        begin=clause.arguments[0].token.source_location.begin,
+                        end=clause.arguments[-1].token.source_location.end,
+                    ),
+                    f"too many arguments to predicate '{clause.predicate.source_name()}'",
+                )
+
+        # Check the format of IDConstants as entities/predicates
+        for clause in pq.clauses:
+            if isinstance(clause.predicate, IDConstant):
+                if clause.predicate.annotation != AnnotationType.BANG:
+                    raise QueryParserException(
+                        clause.predicate.token,
+                        f"unsupported annotation '{clause.predicate.annotation.value}' on predicate {clause.predicate.value}",
+                    )
+                if not re.match("^P[0-9]+$", clause.predicate.value):
+                    raise QueryParserException(
+                        clause.predicate.token,
+                        f"unsupported format for predicate constant: {clause.predicate.value}",
+                    )
+            for argument in clause.arguments:
+                if isinstance(argument, IDConstant):
+                    if argument.annotation != AnnotationType.BANG:
+                        raise QueryParserException(
+                            argument.token,
+                            f"unsupported annotation '{argument.annotation.value}' on predicate {argument.value}",
+                        )
+                    if not re.match("^Q[0-9]+", argument.value):
+                        raise QueryParserException(
+                            argument.token,
+                            f"unsupported format for entity constant: {argument.value}",
+                        )
+
+        return True
 
     def _parse_head(self) -> QueryHead:
         token = self._pop_token()
@@ -175,7 +294,7 @@ class QueryParser:
                 raise QueryParserException(
                     var.token, f"unexpected {var} for aggregation"
                 )
-            item = Aggregation(var=var, type_=AggregationType[token.name])
+            item = Aggregation(token=token, var=var, type_=AggregationType[token.name])
         else:
             raise QueryParserException(
                 token, f"unexpected {token.token_type} in query head"
@@ -185,12 +304,12 @@ class QueryParser:
         # We should always at least encounter the `COLON` token.
         assert token is not None
         if token.token_type == TokenType.COMMA:
-            return [item] + self._parse_head()
+            return QueryHead(items=[item] + self._parse_head().items)
         elif token.token_type != TokenType.COLON:
             raise QueryParserException(
                 token, f"unexpected {token.token_type} in query head"
             )
-        return [item]
+        return QueryHead(items=[item])
 
     def _parse_body(self) -> Tuple[List[Predicate], List[Filter]]:
         clauses: List[Predicate] = []
