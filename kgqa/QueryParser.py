@@ -26,6 +26,9 @@ class Variable:
     def source_name(self) -> str:
         return self.name
 
+    def query_name(self) -> str:
+        return self.name.replace("_", " ")
+
     def __repr__(self) -> str:
         return f"Variable({self.name})"
 
@@ -90,6 +93,9 @@ class IDConstant(Constant):
 
     def source_name(self) -> str:
         return f"{self.annotation.value}{self.value}"
+
+    def query_name(self) -> str:
+        return self.source_name()
 
     def __repr__(self) -> str:
         return f"{self.annotation.value}IDConstant({self.value})"

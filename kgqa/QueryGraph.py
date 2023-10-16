@@ -5,13 +5,15 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Set, Tuple, cast
 from typing_extensions import override
 
-from kgqa.MatchingUtils import match_entities, match_predicates
+from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
 
 from .QueryParser import (
     ArgumentType,
+    IDConstant,
     ParsedQuery,
     PredicateType,
     QueryFilter,
+    StringConstant,
     Variable,
 )
 
@@ -59,6 +61,10 @@ class QueryGraphNode:
 @dataclass
 class QueryGraphEdge:
     predicate: PredicateType
+    matched_pids: List[str] = field(default_factory=list)
+
+    def set_matched_pids(self, pids: List[str]) -> None:
+        self.matched_pids = pids
 
 
 @dataclass
@@ -97,6 +103,8 @@ class AbstractQueryGraph(QueryGraph):
 
 @dataclass
 class ExecutableQueryGraph(QueryGraph):
+    matched_anchors_qids: Dict[QueryGraphId, List[str]] = field(default_factory=dict)
+
     @override
     def is_executable(self) -> bool:
         return True
@@ -154,6 +162,38 @@ def _construct_aqg_from_pq(pq: ParsedQuery) -> AbstractQueryGraph:
     )
 
 
+def _match_predicates(wqg: ExecutableQueryGraph):
+    pred_to_pid_to_score = dict()
+    for _, edges in wqg.edges.items():
+        for edge in edges:
+            if isinstance(edge.predicate, IDConstant):
+                # For IDConstants there is not much to do.
+                pids, scores = [edge.predicate.value], [1.0]
+            else:
+                assert isinstance(edge.predicate, Variable)
+                pids, scores = compute_similar_predicates(edge.predicate.query_name())
+            scores = [round(x, 2) for x in scores]
+            pred_to_pid_to_score[edge.predicate.query_name()] = dict(zip(pids, scores))
+            edge.set_matched_pids(pids)
+            # TODO(jlscheerer) Reimplement follow up via LanguageModel here.
+    return pred_to_pid_to_score
+
+
+def _match_entities(wqg: ExecutableQueryGraph):
+    ent_to_qid_to_score = dict()
+    for node in wqg.nodes:
+        if not node.is_free:
+            # Temporary assumption. TODO(jlscheerer) handle different constants.
+            if isinstance(node.value, StringConstant):
+                qids, scores = compute_similar_entity_ids(node.value.value)
+            else:
+                assert False
+            scores = [round(x, 2) for x in scores]
+            wqg.matched_anchors_qids[node.id_] = qids
+            ent_to_qid_to_score[node.value.value] = dict(zip(qids, scores))
+    return ent_to_qid_to_score
+
+
 def query2aqg(pq: ParsedQuery) -> Tuple[AbstractQueryGraph, QueryStatistics]:
     return _construct_aqg_from_pq(pq), QueryStatistics()
 
@@ -172,10 +212,10 @@ def aqg2wqg(
     )
 
     # Transform edges of the graph.
-    pid2scores = match_predicates(aqg)
+    pid2scores = _match_predicates(wqg)
 
     # Transform entities of the graph
-    qid2scores = match_entities(aqg)
+    qid2scores = _match_entities(wqg)
 
     # Add scores info the stats.
     stats.set_scores(pid2scores, qid2scores)
