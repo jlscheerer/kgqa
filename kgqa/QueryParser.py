@@ -10,6 +10,7 @@ from .QueryLexer import (
     NumericLiteral,
     QueryLexer,
     QueryLexerException,
+    QuoteType,
     SourceLocation,
     StringLiteral,
     Token,
@@ -128,7 +129,7 @@ class QueryAtom:
 
 
 @dataclass
-class Predicate(QueryAtom):
+class QueryClause(QueryAtom):
     predicate: Union[IDConstant, Variable]
     arguments: List[Union[Variable, Constant]]
 
@@ -152,7 +153,7 @@ class FilterOp(Enum):
 
 
 @dataclass
-class Filter(QueryAtom):
+class QueryFilter(QueryAtom):
     lhs: Variable
     op: FilterOp
     rhs: Constant
@@ -165,8 +166,8 @@ class Filter(QueryAtom):
 class ParsedQuery:
     head: QueryHead
 
-    clauses: List[Predicate]
-    filters: List[Filter]
+    clauses: List[QueryClause]
+    filters: List[QueryFilter]
 
 
 class QueryParserException(Exception):
@@ -191,7 +192,43 @@ class QueryParser:
         pq = ParsedQuery(head=head, clauses=clauses, filters=filters)
         if not self._validate_query(pq):
             raise AssertionError()
-        return pq
+        return self._rewrite_query(pq)
+
+    def _rewrite_query(self, pq: ParsedQuery) -> ParsedQuery:
+        # Rewrite unary queries using "instance_of": person(X) becomes !P31(X, "person")
+        clauses: List[QueryClause] = []
+        for clause in pq.clauses:
+            if len(clause.arguments) != 1:
+                clauses.append(clause)
+                continue
+
+            type_ = clause.predicate
+            if not isinstance(type_, Variable):
+                raise QueryParserException(
+                    clause.predicate.token, "cannot rewrite unary predicate"
+                )
+            assert isinstance(type_, Variable)
+
+            type_lit = StringLiteral(
+                source_location=clause.predicate.token.source_location,
+                value=type_.name,
+            )
+            clauses.append(
+                QueryClause(
+                    predicate=IDConstant(
+                        Identifier(
+                            source_location=SourceLocation.synthetic(), name="P31"
+                        ),
+                        annotation=AnnotationType.BANG,
+                        value="P31",
+                    ),
+                    arguments=[
+                        clause.arguments[0],
+                        StringConstant(token=type_lit, value=type_lit.value),
+                    ],
+                )
+            )
+        return ParsedQuery(head=pq.head, clauses=clauses, filters=pq.filters)
 
     def _validate_query(self, pq: ParsedQuery) -> bool:
         head_vars = pq.head.vars()
@@ -267,6 +304,15 @@ class QueryParser:
                             f"unsupported format for entity constant: {argument.value}",
                         )
 
+        # Check for unsupported quote types - currently only "" is supported.
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                if isinstance(argument, StringConstant):
+                    if argument.token.quote_type != QuoteType.DOUBLE_QUOTE:
+                        raise QueryParserException(
+                            argument.token, "unsupported quote type for argument"
+                        )
+
         return True
 
     def _parse_head(self) -> QueryHead:
@@ -311,9 +357,9 @@ class QueryParser:
             )
         return QueryHead(items=[item])
 
-    def _parse_body(self) -> Tuple[List[Predicate], List[Filter]]:
-        clauses: List[Predicate] = []
-        filters: List[Filter] = []
+    def _parse_body(self) -> Tuple[List[QueryClause], List[QueryFilter]]:
+        clauses: List[QueryClause] = []
+        filters: List[QueryFilter] = []
         while True:
             atom = self._parse_atom()
             if atom is None:
@@ -322,10 +368,10 @@ class QueryParser:
                     "missing query body",
                 )
 
-            if isinstance(atom, Predicate):
+            if isinstance(atom, QueryClause):
                 clauses.append(atom)
             else:
-                assert isinstance(atom, Filter)
+                assert isinstance(atom, QueryFilter)
                 filters.append(atom)
 
             if self._curr_token() is None:
@@ -360,7 +406,7 @@ class QueryParser:
                 predicate = Variable(token=ident, name=ident.name)
             else:
                 predicate = self._as_id_constant(annotation=annotation, constant=ident)
-            return Predicate(predicate=predicate, arguments=arguments)
+            return QueryClause(predicate=predicate, arguments=arguments)
         elif token.token_type == TokenType.COMPARATOR:
             # We cannot have annotated predicates with comparisons.
             if annotation is not None:
@@ -382,7 +428,7 @@ class QueryParser:
                     rhs,
                     f"expected {TokenType.STRING_LITERAL} | {TokenType.NUMERIC_LITERAL} got {rhs.token_type}",
                 )
-            return Filter(
+            return QueryFilter(
                 lhs=Variable(token=ident, name=ident.name),
                 op=FilterOp(op.operator),
                 rhs=self._as_constant(rhs),

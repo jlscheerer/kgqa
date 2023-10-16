@@ -31,6 +31,10 @@ class SourceLocation:
     begin: int
     end: int
 
+    @staticmethod
+    def synthetic():
+        return SourceLocation(begin=-1, end=-1)
+
 
 @dataclass
 class TokenBase:
