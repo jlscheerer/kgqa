@@ -5,18 +5,31 @@ import readline
 from typing import List
 from yaspin import yaspin
 from tabulate import tabulate
+from termcolor import colored
 
-from kgqa.AbstractQueryGraph import aqg2wqg, query2aqg
-from kgqa.SQLUtils import wqg2sql
-from kgqa.QueryParser import QueryParser
+from kgqa.QueryGraph import query2aqg, aqg2wqg
+from kgqa.QueryLexer import QueryLexerException, SourceLocation
+from kgqa.QueryParser import QueryParser, QueryParserException
 from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entity_ids
 from kgqa.FaissIndex import FaissIndexDirectory
 from kgqa.Database import Database
+from kgqa.SQLBackend import wqg2sql
 
 
 def _display_query_results(results, columns):
     pydoc.pipepager(tabulate(results, columns, tablefmt="orgtbl"), cmd="less -R")
+
+
+def _annotate_parser_error(query: str, source_location: SourceLocation, error: str):
+    print(
+        f"{colored('error', 'red', attrs=['bold'])}: {colored(error, 'white', attrs=['bold'])}"
+    )
+    print(f"  {query}")
+    print(
+        " " * (source_location.begin + 2)
+        + colored("^" * (source_location.end - source_location.begin), "green")
+    )
 
 
 def _handle_user_query(query: str):
@@ -37,6 +50,12 @@ def _handle_user_query(query: str):
             results, columns = run_and_rank(sql, stats, wqg)
 
         _display_query_results(results, columns)
+    except QueryLexerException as err:
+        _annotate_parser_error(query, err.source_location, err.error)
+        return
+    except QueryParserException as err:
+        _annotate_parser_error(query, err.token.source_location, err.error)
+        return
     except Exception as err:
         print(f"Error: {err}")
         traceback.print_exc()
