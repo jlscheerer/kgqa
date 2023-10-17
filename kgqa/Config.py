@@ -1,6 +1,7 @@
-from .Singleton import Singleton
 import yaml
 import os
+
+from .Singleton import Singleton
 
 DEFAULT_CONFIG_PATH = "./config.yaml"
 
@@ -17,7 +18,7 @@ class Config(metaclass=Singleton):
         try:
             return self._config[item]
         except Exception:
-            raise AssertionError(f"Config is missing required parameter: {item}")
+            raise AssertionError(f"config is missing required parameter: {item}")
 
     def get_or_default(self, item, default):
         if item in self._config:

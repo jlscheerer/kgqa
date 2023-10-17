@@ -22,6 +22,11 @@ class VariableEdgeOccurrence:
     is_subj: bool
 
 
+@dataclass
+class QueryString:
+    value: str
+
+
 class QueryBackend(abc.ABC):
     graph: ExecutableQueryGraph
 
@@ -73,7 +78,9 @@ class QueryBackend(abc.ABC):
             self.columns.append(HeadEntityColumnInfo(index=head_var_id, entity=entity))
 
     @abc.abstractmethod
-    def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
+    def to_query(
+        self, stats: QueryStatistics, emit_labels: bool = False
+    ) -> QueryString:
         """
         Generates an executable query string through the QueryBackend.
         """
