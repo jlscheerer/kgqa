@@ -1,14 +1,12 @@
 from typing import Tuple, List
 from typing_extensions import override
 
-from kgqa.QueryParser import Variable
-
 from .QueryBackend import (
     QueryBackend,
 )
 from .QueryGraph import (
+    AnchorEntityColumnInfo,
     ColumnInfo,
-    EntityColumnInfo,
     ExecutableQueryGraph,
     HeadEntityColumnInfo,
     PropertyColumnInfo,
@@ -21,12 +19,12 @@ from .QueryGraph import (
 class SQLBackend(QueryBackend):
     @override
     def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
-        SELECT, columns = self._construct_select()
+        SELECT = self._construct_select()
         FROM = self._construct_from()
         WHERE = self._construct_where()
         query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
 
-        stats.set_column_info(columns)
+        stats.set_column_info(self.columns)
         if emit_labels:
             query = self._join_query_labels(query, stats.columns)
         else:
@@ -41,6 +39,7 @@ class SQLBackend(QueryBackend):
         return ", ".join(claims)
 
     def _get_all_sql_address_for_var(self, varid: QueryGraphId) -> List[str]:
+        # TODO(jlscheerer) Refactor this code.
         adrs: List[str] = []
         # Check if current varid is going to be a filter.
         # If that's the case, there must be 1 edge (we make it non-joinable for now.)
@@ -56,41 +55,24 @@ class SQLBackend(QueryBackend):
             adrs.append(f"c{edge_id}.{so_type}")
         return adrs
 
-    def _construct_select(self) -> Tuple[str, List[ColumnInfo]]:
+    def _construct_select(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
-        heads = []
-        columns: List[ColumnInfo] = []
-
-        # Select all properties
-        for index, (_, edges) in enumerate(self.graph.edges.items()):
-            # TODO(jlscheerer) Update this assertion, mimic legacy behavior.
-            assert len(edges) == 1
-            edge = edges[0]
-
-            columns.append(PropertyColumnInfo(index=index, predicate=edge.predicate))
-            heads.append(f'c{index}.property AS "{columns[-1]}"')
-
-        # Select all anchors
-        num_anchors = 0
-        for node in self.graph.nodes:
-            if not node.is_free:
-                num_anchors += 1
-                node_addr = self._get_all_sql_address_for_var(node.id_)[0]
-
-                columns.append(EntityColumnInfo(entity=node.value))
-                heads.append(f'{node_addr} AS "{columns[-1]}"')
-
-        # Select all head free vars.
-        for hv_id in self.graph.head_var_ids:
-            # NOTE As entity occurs in the head of the query, it must be a variable.
-            entity = self.graph.nodes[hv_id.value].value
-            assert isinstance(entity, Variable)
-
-            columns.append(HeadEntityColumnInfo(entity=entity))
-            adrs = self._get_all_sql_address_for_var(hv_id)
-            heads.append(f'{adrs[0]} AS "{columns[-1]}"')
-
-        return ", ".join(heads), columns
+        heads: List[str] = []
+        for column in self.columns:
+            if isinstance(column, PropertyColumnInfo):
+                heads.append(f'c{column.index}.property AS "{column}"')
+            elif isinstance(column, AnchorEntityColumnInfo):
+                # NOTE for the purpose of the select, it does not matter what column we
+                #      reference, so we just pick the first.
+                node_addr = self._get_all_sql_address_for_var(column.index)[0]
+                heads.append(f'{node_addr} AS "{column}"')
+            else:
+                assert isinstance(column, HeadEntityColumnInfo)
+                # NOTE for the purpose of the select, it does not matter what column we
+                #      reference, so we just pick the first.
+                node_addr = self._get_all_sql_address_for_var(column.index)[0]
+                heads.append(f'{node_addr} AS "{column}"')
+        return ", ".join(heads)
 
     def _construct_where_join_condition(
         self, where_conds: List[str], all_adrs: List[str]
@@ -102,16 +84,15 @@ class SQLBackend(QueryBackend):
         ]
         where_conds.append(" AND ".join(cond))
 
-    def _construct_pid_list(self, pid_list: List[str]) -> str:
-        pid_list_single_quote = [f"'{x}'" for x in pid_list]
-        return ", ".join(pid_list_single_quote)
+    def _construct_id_list(self, ids: List[str]) -> str:
+        return ", ".join([f"'{id_}'" for id_ in ids])
 
     def _construct_where_anchor_node(
         self, node: QueryGraphNode, where_conds: List[str]
     ) -> None:
         node_addr = self._get_all_sql_address_for_var(node.id_)[0]
         qids = self.graph.matched_anchors_qids[node.id_]
-        qids_list = self._construct_pid_list(qids)
+        qids_list = self._construct_id_list(qids)
         where_conds.append(f"{node_addr} IN ({qids_list})")
 
     def _construct_where(self) -> str:
@@ -123,7 +104,7 @@ class SQLBackend(QueryBackend):
             edge = edges[0]
 
             where_conds.append(
-                f"c{index}.property IN ({self._construct_pid_list(edge.get_matched_pids())})"
+                f"c{index}.property IN ({self._construct_id_list(edge.get_matched_pids())})"
             )
         for node in self.graph.nodes:
             all_adrs = self._get_all_sql_address_for_var(node.id_)
@@ -147,17 +128,17 @@ class SQLBackend(QueryBackend):
             return column_name[: -len(" (pid)")]
         return column_name
 
-    def _join_query_labels(self, query: str, column_names: List[ColumnInfo]) -> str:
+    def _join_query_labels(self, query: str, columns: List[ColumnInfo]) -> str:
         selections = ", ".join(
             [
                 f'oq."{column}", l{index}.value AS "{self._strip_id_if_needed(column)} (label)"'
-                for (index, column) in enumerate(column_names)
+                for (index, column) in enumerate(columns)
             ]
         )
         label_joins = " ".join(
             [
                 f'LEFT JOIN labels_en l{index} ON l{index}.id = oq."{column}"'
-                for (index, column) in enumerate(column_names)
+                for (index, column) in enumerate(columns)
             ]
         )
         return f"""WITH orig_query AS ({query})

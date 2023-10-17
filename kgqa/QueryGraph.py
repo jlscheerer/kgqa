@@ -20,6 +20,31 @@ from .QueryParser import (
 
 
 @dataclass
+class QueryGraphId:
+    value: int
+
+    def __repr__(self) -> str:
+        return f"QGID({self.value})"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, QueryGraphId):
+            return False
+        return self.value == other.value
+
+    def __hash__(self):
+        return hash(self.value)
+
+
+class QueryGraphIdGenerator:
+    _current_id: int = 0
+
+    def __call__(self):
+        id_ = self._current_id
+        self._current_id += 1
+        return QueryGraphId(value=id_)
+
+
+@dataclass
 class ColumnInfo(abc.ABC):
     @abc.abstractmethod
     def __repr__(self) -> str:
@@ -41,8 +66,12 @@ class PropertyColumnInfo(ColumnInfo):
 
 @dataclass
 class EntityColumnInfo(ColumnInfo):
+    index: QueryGraphId  # ID of the Node in the QueryGraph representing the entity.
     entity: ArgumentType
 
+
+@dataclass
+class AnchorEntityColumnInfo(EntityColumnInfo):
     @override
     def __repr__(self) -> str:
         if isinstance(self.entity, StringConstant):
@@ -87,36 +116,13 @@ class QueryStatistics:
         return self._count_of_type(PropertyColumnInfo)
 
     def num_anchors(self) -> int:
-        # NOTE HeadEntityColumnInfo is derived from EntityColumnInfo.
-        return self._count_of_type(EntityColumnInfo) - self.num_heads()
+        return self._count_of_type(AnchorEntityColumnInfo)
 
     def num_heads(self) -> int:
         return self._count_of_type(HeadEntityColumnInfo)
 
     def _count_of_type(self, type_: Type) -> int:
         return len([column for column in self.columns if isinstance(column, type_)])
-
-
-@dataclass
-class QueryGraphId:
-    value: int
-
-    def __eq__(self, other) -> bool:
-        if not isinstance(other, QueryGraphId):
-            return False
-        return self.value == other.value
-
-    def __hash__(self):
-        return hash(self.value)
-
-
-class QueryGraphIdGenerator:
-    _current_id: int = 0
-
-    def __call__(self):
-        id_ = self._current_id
-        self._current_id += 1
-        return QueryGraphId(value=id_)
 
 
 @dataclass
