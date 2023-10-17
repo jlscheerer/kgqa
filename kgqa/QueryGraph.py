@@ -2,7 +2,7 @@ import abc
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, cast, reveal_type
+from typing import Any, Dict, List, Set, Tuple, cast
 from typing_extensions import override
 
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
@@ -74,16 +74,6 @@ class QueryGraphNode:
     is_free: bool
     value: ArgumentType
 
-    def to_str(self) -> str:
-        if isinstance(self.value, StringConstant):
-            return self.value.value
-        elif isinstance(self.value, Variable):
-            return f"Variable({self.value.name})"
-        elif isinstance(self.value, IDConstant):
-            return f"IDConstant({self.value.value})"
-
-        # TODO(jlscheerer) Eventually we need to handle different types here.
-        assert False
 
 
 @dataclass

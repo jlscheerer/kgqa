@@ -1,5 +1,7 @@
 import abc
+from dataclasses import dataclass
 from typing import Dict, List, Tuple
+from typing_extensions import override
 
 from kgqa.QueryGraph import (
     ExecutableQueryGraph,
@@ -7,6 +9,63 @@ from kgqa.QueryGraph import (
     QueryGraphId,
     QueryStatistics,
 )
+from kgqa.QueryParser import (
+    ArgumentType,
+    IDConstant,
+    PredicateType,
+    StringConstant,
+    Variable,
+)
+
+
+@dataclass
+class ColumnInfo(abc.ABC):
+    @abc.abstractmethod
+    def __repr__(self) -> str:
+        """
+        Constructs a serializable name for the column.
+        """
+        pass
+
+
+@dataclass
+class PropertyColumnInfo(ColumnInfo):
+    index: int  # TODO(jlscheerer) We should probably abstract this.
+    predicate: PredicateType
+
+    @override
+    def __repr__(self) -> str:
+        return f"{self.predicate.query_name()} ({self.index}) (pid)"
+
+
+@dataclass
+class EntityColumnInfo(ColumnInfo):
+    entity: ArgumentType
+
+    @override
+    def __repr__(self) -> str:
+        if isinstance(self.entity, StringConstant):
+            return f"{self.entity.value} (qid)"
+        elif isinstance(self.entity, Variable):
+            return f"Variable({self.entity.name}) (qid)"
+        elif isinstance(self.entity, IDConstant):
+            return f"IDConstant({self.entity.value}) (qid)"
+
+        # TODO(jlscheerer) Eventually we need to handle different types here.
+        assert False
+
+
+@dataclass
+class HeadEntityColumnInfo(EntityColumnInfo):
+    """
+    Entity that occurs in the head of a query.
+    """
+
+    entity: Variable
+
+    @override
+    def __repr__(self) -> str:
+        return f"Variable({self.entity.name})"
 
 
 class QueryBackend(abc.ABC):

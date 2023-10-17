@@ -1,7 +1,15 @@
 from typing import Tuple, List
 from typing_extensions import override
 
-from .QueryBackend import QueryBackend
+from kgqa.QueryParser import Variable
+
+from .QueryBackend import (
+    ColumnInfo,
+    EntityColumnInfo,
+    HeadEntityColumnInfo,
+    PropertyColumnInfo,
+    QueryBackend,
+)
 from .QueryGraph import (
     ExecutableQueryGraph,
     QueryGraphId,
@@ -10,18 +18,20 @@ from .QueryGraph import (
 )
 
 
-class SQL_IR(QueryBackend):
+class SQLBackend(QueryBackend):
     @override
     def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
         SELECT, nums_and_cols_stats = self._construct_select()
-        stats.add_nums_and_cols(*nums_and_cols_stats)
         FROM = self._construct_from()
         WHERE = self._construct_where()
         query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
+
+        stats.add_nums_and_cols(*nums_and_cols_stats)
         if emit_labels:
-            query = self._join_labels(query, stats.column_names)
+            query = self._join_query_labels(query, stats.column_names)
         else:
             query = f"{query};"
+
         return query
 
     def _construct_from(self) -> str:
@@ -49,41 +59,46 @@ class SQL_IR(QueryBackend):
     def _construct_select(self) -> Tuple[str, Tuple[int, int, int, List[str]]]:
         # NOTE We cut out some logic related to templated QueryGraphs.
         heads = []
-        col_names = []
+        column_names: List[str] = []
 
-        # Select all properties (predicates)
-        for i, (_, edges) in enumerate(self.graph.edges.items()):
-            # TODO(jlscheerer) Update this assertion, Mimic legacy behavior.
+        # Select all properties
+        column: ColumnInfo
+        for index, (_, edges) in enumerate(self.graph.edges.items()):
+            # TODO(jlscheerer) Update this assertion, mimic legacy behavior.
             assert len(edges) == 1
             edge = edges[0]
 
-            col_name = f"{edge.predicate.query_name()} ({i}) (pid)"
-            heads.append(f'c{i}.property AS "{col_name}"')
-            col_names.append(col_name)
+            column = PropertyColumnInfo(index=index, predicate=edge.predicate)
+            heads.append(f'c{index}.property AS "{column}"')
+            column_names.append(f"{column}")
 
         # Select all anchors
         num_anchors = 0
         for node in self.graph.nodes:
             if not node.is_free:
-                node_addr = self._get_all_sql_address_for_var(node.id_)[0]
-                col_name = f"{node.to_str()} (qid)"
-                heads.append(f'{node_addr} AS "{col_name}"')
-                col_names.append(col_name)
                 num_anchors += 1
+                node_addr = self._get_all_sql_address_for_var(node.id_)[0]
+
+                column = EntityColumnInfo(entity=node.value)
+                heads.append(f'{node_addr} AS "{column}"')
+                column_names.append(f"{column}")
 
         # Select all head free vars.
-        for i, hv_id in enumerate(self.graph.head_var_ids):
+        for hv_id in self.graph.head_var_ids:
+            # NOTE As entity occurs in the head of the query, it must be a variable.
+            entity = self.graph.nodes[hv_id.value].value
+            assert isinstance(entity, Variable)
+
+            column = HeadEntityColumnInfo(entity=entity)
             adrs = self._get_all_sql_address_for_var(hv_id)
-            # We are free to use any address for this var when it's a head.
-            col_name = self.graph.nodes[hv_id.value].to_str()
-            heads.append(f'{adrs[0]} AS "{col_name}"')
-            col_names.append(col_name)
+            heads.append(f'{adrs[0]} AS "{column}"')
+            column_names.append(f"{column}")
 
         nums_and_cols_stats = (
             len(self.graph.edges),
             num_anchors,
             len(self.graph.head_var_ids),
-            col_names,
+            column_names,
         )
         return ", ".join(heads), nums_and_cols_stats
 
@@ -91,7 +106,10 @@ class SQL_IR(QueryBackend):
         self, where_conds: List[str], all_adrs: List[str]
     ) -> None:
         all_adrs += [all_adrs[0]]
-        cond = [f"{all_adrs[i]} = {all_adrs[i+1]}" for i in range(len(all_adrs) - 1)]
+        cond = [
+            f"{all_adrs[index]} = {all_adrs[index + 1]}"
+            for index in range(len(all_adrs) - 1)
+        ]
         where_conds.append(" AND ".join(cond))
 
     def _construct_pid_list(self, pid_list: List[str]) -> str:
@@ -109,13 +127,13 @@ class SQL_IR(QueryBackend):
     def _construct_where(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
         where_conds: List[str] = []
-        for i, (_, edges) in enumerate(self.edge_list):
+        for index, (_, edges) in enumerate(self.edge_list):
             # TODO(jlscheerer) Update this assertion, mimic legacy behavior.
             assert len(edges) == 1
             edge = edges[0]
 
             where_conds.append(
-                f"c{i}.property IN ({self._construct_pid_list(edge.get_matched_pids())})"
+                f"c{index}.property IN ({self._construct_pid_list(edge.get_matched_pids())})"
             )
         for node in self.graph.nodes:
             all_adrs = self._get_all_sql_address_for_var(node.id_)
@@ -138,7 +156,7 @@ class SQL_IR(QueryBackend):
             return column_name[: -len(" (pid)")]
         return column_name
 
-    def _join_labels(self, query: str, column_names: List[str]) -> str:
+    def _join_query_labels(self, query: str, column_names: List[str]) -> str:
         selections = ", ".join(
             [
                 f'oq."{column}", l{index}.value AS "{self._strip_id_if_needed(column)} (label)"'
@@ -159,5 +177,5 @@ class SQL_IR(QueryBackend):
 def wqg2sql(
     wqg: ExecutableQueryGraph, stats: QueryStatistics, emit_labels: bool = False
 ) -> Tuple[str, QueryStatistics]:
-    sql = SQL_IR(wqg).to_query(stats, emit_labels)
+    sql = SQLBackend(wqg).to_query(stats, emit_labels)
     return sql, stats
