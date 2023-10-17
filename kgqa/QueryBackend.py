@@ -91,3 +91,11 @@ class QueryBackend(abc.ABC):
 
     def requires_aggregation(self) -> bool:
         raise AssertionError()
+
+    def _column_by_edge_index(self, index: int) -> PropertyColumnInfo:
+        # TODO(jlscheerer) We can definitely improve this.
+        for column in self.columns:
+            if isinstance(column, PropertyColumnInfo):
+                if column.index == index:
+                    return column
+        raise AssertionError("attempting to get column info for invalid edge")

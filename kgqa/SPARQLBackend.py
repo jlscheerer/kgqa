@@ -1,5 +1,6 @@
+import inspect
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Tuple
 from typing_extensions import override
 
 from kgqa.QueryBackend import QueryBackend, QueryString
@@ -32,14 +33,15 @@ class SPARQLBackend(QueryBackend):
         SELECT = self._construct_select()
         WHERE = self._construct_where()
         FILTER = self._construct_filter()
-        query = f"""SELECT {SELECT}
-                    WHERE
-                    {{
-                        {WHERE}
-                        FILTER({FILTER})
-                        SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-                    }}
-                 """
+        query = self._dedent_query(
+            f"""SELECT {SELECT}
+                WHERE
+                {{
+                    {WHERE}
+                    FILTER(\t{FILTER})
+                    SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+                }}"""
+        )
 
         stats.set_column_info(self.columns)
 
@@ -54,10 +56,22 @@ class SPARQLBackend(QueryBackend):
         return "?X wdt:P57 wd:Q3772 ."
 
     def _construct_filter(self) -> str:
-        if not self.requires_filters():
-            # TODO(jlscheerer) We need to check for empty here instead.
+        filters: List[str] = []
+
+        assert not self.requires_filters()
+
+        for index, (_, _, edge) in enumerate(self.edge_list):
+            column = self._column_by_edge_index(index)
+            filters.append(
+                f"{self._sparql_name_for_column(column)} IN ({self._construct_pid_list(edge.get_matched_pids())})"
+            )
+
+        if len(filters) == 0:
             return "True"
-        return ""
+        return " &&\n\t\t\t\t".join(filters)
+
+    def _construct_pid_list(self, pids: List[str]) -> str:
+        return ", ".join([f"wdt:{pid}" for pid in pids])
 
     def _sparql_name_for_column(self, column: ColumnInfo) -> str:
         if column in self.col2name:
@@ -71,6 +85,9 @@ class SPARQLBackend(QueryBackend):
             self.col2name[column] = f"?H{len(self.col2name)}"
 
         return self.col2name[column]
+
+    def _dedent_query(self, query: str) -> str:
+        return inspect.cleandoc(query)
 
 
 def wqg2sparql(
