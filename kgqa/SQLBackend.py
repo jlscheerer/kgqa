@@ -10,48 +10,43 @@ from .QueryGraph import (
 )
 
 
-def construct_pid_list(pid_list):
-    pid_list_single_quote = [f"'{x}'" for x in pid_list]
-    return ", ".join(pid_list_single_quote)
-
-
-def construct_sqlir_from_aqg(wqg: ExecutableQueryGraph):
-    # TODO(jlscheerer) We probably want to flaten the inner edges.
-    edge_list = [(k, v) for k, v in wqg.edges.items()]
-
-    # Construct mapping, from each var to edge id and position
-    var2edges: Dict[QueryGraphId, List[Tuple[int, int]]] = dict()
-    for i, (k, _) in enumerate(edge_list):
-        sid, oid = k
-        var2edges[sid] = var2edges.get(sid, []) + [(i, 1)]
-        var2edges[oid] = var2edges.get(oid, []) + [(i, 0)]
-
-    return SQL_IR(wqg, edge_list, var2edges)
-
-
-def strip_qid_if_needed(s):
-    if len(s) > 6 and (s[-5:] == "(pid)" or s[-5:] == "(qid)"):
-        return s[:-6]
-    else:
-        return s
-
-
 @dataclass
 class SQL_IR:
     graph: ExecutableQueryGraph
     edge_list: List[Tuple[Tuple[QueryGraphId, QueryGraphId], List[QueryGraphEdge]]]
     var2edges: Dict[QueryGraphId, List[Tuple[int, int]]]
 
-    def get_n_heads(self) -> int:
-        return len(self.graph.head_var_ids)
+    def __init__(self, wqg: ExecutableQueryGraph):
+        self.graph = wqg
 
-    def construct_from(self) -> str:
+        # TODO(jlscheerer) We probably want to flaten the inner edges.
+        self.edge_list = [(edge_id, edges) for edge_id, edges in wqg.edges.items()]
+
+        # Construct a mapping from each var to edge_id and position.
+        self.var2edges: Dict[QueryGraphId, List[Tuple[int, int]]] = dict()
+        for index, ((subj_id, obj_id), _) in enumerate(self.edge_list):
+            self.var2edges[subj_id] = self.var2edges.get(subj_id, []) + [(index, 1)]
+            self.var2edges[obj_id] = self.var2edges.get(obj_id, []) + [(index, 0)]
+
+    def to_sql(self, query_stats: QueryStatistics, emit_labels: bool = False) -> str:
+        SELECT, nums_and_cols_stats = self._construct_select()
+        query_stats.add_nums_and_cols(*nums_and_cols_stats)
+        FROM = self._construct_from()
+        WHERE = self._construct_where()
+        query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
+        if emit_labels:
+            query = self._join_labels(query, query_stats.column_names)
+        else:
+            query = f"{query};"
+        return query
+
+    def _construct_from(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
         claims_relname = "claims_5m_inv"
         claims = [f"{claims_relname} c{i}" for i in range(0, len(self.edge_list))]
         return ", ".join(claims)
 
-    def get_all_sql_address_for_var(self, varid: QueryGraphId) -> List[str]:
+    def _get_all_sql_address_for_var(self, varid: QueryGraphId) -> List[str]:
         adrs: List[str] = []
         # Check if current varid is going to be a filter.
         # If that's the case, there must be 1 edge (we make it non-joinable for now.)
@@ -67,7 +62,7 @@ class SQL_IR:
             adrs.append(f"c{edge_id}.{so_type}")
         return adrs
 
-    def construct_select(self) -> Tuple[str, Tuple[int, int, int, List[str]]]:
+    def _construct_select(self) -> Tuple[str, Tuple[int, int, int, List[str]]]:
         # NOTE We cut out some logic related to templated QueryGraphs.
         heads = []
         col_names = []
@@ -86,7 +81,7 @@ class SQL_IR:
         num_anchors = 0
         for node in self.graph.nodes:
             if not node.is_free:
-                node_addr = self.get_all_sql_address_for_var(node.id_)[0]
+                node_addr = self._get_all_sql_address_for_var(node.id_)[0]
                 col_name = f"{node.to_str()} (qid)"
                 heads.append(f'{node_addr} AS "{col_name}"')
                 col_names.append(col_name)
@@ -94,7 +89,7 @@ class SQL_IR:
 
         # Select all head free vars.
         for i, hv_id in enumerate(self.graph.head_var_ids):
-            adrs = self.get_all_sql_address_for_var(hv_id)
+            adrs = self._get_all_sql_address_for_var(hv_id)
             # We are free to use any address for this var when it's a head.
             col_name = self.graph.nodes[hv_id.value].to_str()
             heads.append(f'{adrs[0]} AS "{col_name}"')
@@ -108,44 +103,42 @@ class SQL_IR:
         )
         return ", ".join(heads), nums_and_cols_stats
 
-    def construct_where_join_condition(
-        self, node: QueryGraphNode, where_conds: List[str], all_adrs: List[str]
+    def _construct_where_join_condition(
+        self, where_conds: List[str], all_adrs: List[str]
     ) -> None:
         all_adrs += [all_adrs[0]]
         cond = [f"{all_adrs[i]} = {all_adrs[i+1]}" for i in range(len(all_adrs) - 1)]
         where_conds.append(" AND ".join(cond))
 
-    def construct_where_anchor_node_executable(
+    def _construct_pid_list(self, pid_list: List[str]) -> str:
+        pid_list_single_quote = [f"'{x}'" for x in pid_list]
+        return ", ".join(pid_list_single_quote)
+
+    def _construct_where_anchor_node(
         self, node: QueryGraphNode, where_conds: List[str]
     ) -> None:
-        node_addr = self.get_all_sql_address_for_var(node.id_)[0]
+        node_addr = self._get_all_sql_address_for_var(node.id_)[0]
         qids = self.graph.matched_anchors_qids[node.id_]
-        qids_list = construct_pid_list(qids)
+        qids_list = self._construct_pid_list(qids)
         where_conds.append(f"{node_addr} IN ({qids_list})")
 
-    def add_edge_filter_for_templates(self, where_conds: List[str]) -> None:
-        for i, _ in enumerate(self.graph.edges):
-            where_conds.append(
-                f"c{i}.property in (select pid from pids_of_interest_entities)"
-            )
-
-    def construct_where(self) -> str:
+    def _construct_where(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
         where_conds: List[str] = []
         for i, (_, edges) in enumerate(self.edge_list):
-            # TODO(jlscheerer) Update this assertion, Mimic legacy behavior.
+            # TODO(jlscheerer) Update this assertion, mimic legacy behavior.
             assert len(edges) == 1
             edge = edges[0]
 
             where_conds.append(
-                f"c{i}.property IN ({construct_pid_list(edge.get_matched_pids())})"
+                f"c{i}.property IN ({self._construct_pid_list(edge.get_matched_pids())})"
             )
         for node in self.graph.nodes:
-            all_adrs = self.get_all_sql_address_for_var(node.id_)
+            all_adrs = self._get_all_sql_address_for_var(node.id_)
             if len(all_adrs) >= 2:
-                self.construct_where_join_condition(node, where_conds, all_adrs)
+                self._construct_where_join_condition(where_conds, all_adrs)
             if not node.is_free:
-                self.construct_where_anchor_node_executable(node, where_conds)
+                self._construct_where_anchor_node(node, where_conds)
         # Add filtering conditions.
         # TODO(jlscheerer) Support filtering conditions here.
         # for filter_ in self.graph.filters:
@@ -156,43 +149,33 @@ class SQL_IR:
         #     )
         return " AND ".join(where_conds)
 
-    def sqlize(
-        self, query_stats=QueryStatistics(), with_all_labels: bool = False
-    ) -> str:
-        SELECT, nums_and_cols_stats = self.construct_select()
-        query_stats.add_nums_and_cols(*nums_and_cols_stats)
-        FROM = self.construct_from()
-        WHERE = self.construct_where()
-        orig_query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
-        if not with_all_labels:
-            return f"{orig_query};"
-        else:
-            return self.join_labels(orig_query, query_stats.column_names)
+    def _strip_qid_if_needed(self, column_name: str) -> str:
+        if len(column_name) > 6 and (
+            column_name[-5:] == "(pid)" or column_name[-5:] == "(qid)"
+        ):
+            return column_name[:-6]
+        return column_name
 
-    # TODO(jlscheerer) This is not necessary, and should be removed from the backend(s).
-    def join_labels(self, orig_query: str, col_names: List[str]) -> str:
+    def _join_labels(self, query: str, column_names: List[str]) -> str:
         selections = ", ".join(
             [
-                f'oq."{cname}", l{i}.value AS "{strip_qid_if_needed(cname)} (label)"'
-                for (i, cname) in enumerate(col_names)
+                f'oq."{column}", l{index}.value AS "{self._strip_qid_if_needed(column)} (label)"'
+                for (index, column) in enumerate(column_names)
             ]
         )
-        ljoins = " ".join(
+        label_joins = " ".join(
             [
-                f'LEFT JOIN labels_en l{i} ON l{i}.id = oq."{cname}"'
-                for (i, cname) in enumerate(col_names)
+                f'LEFT JOIN labels_en l{index} ON l{index}.id = oq."{column}"'
+                for (index, column) in enumerate(column_names)
             ]
         )
-        full_query = f"""WITH orig_query AS ({orig_query})
-                         SELECT {selections}
-                         FROM orig_query oq {ljoins};"""
-        return full_query
+        return f"""WITH orig_query AS ({query})
+                   SELECT {selections}
+                   FROM orig_query oq {label_joins};"""
 
 
 def wqg2sql(
-    wqg: ExecutableQueryGraph, query_stats: QueryStatistics
+    wqg: ExecutableQueryGraph, query_stats: QueryStatistics, emit_labels: bool = False
 ) -> Tuple[str, QueryStatistics]:
-    sql_ir = construct_sqlir_from_aqg(wqg)
-    should_join_labels = True
-    sql_str = sql_ir.sqlize(query_stats, should_join_labels)
-    return sql_str, query_stats
+    sql = SQL_IR(wqg).to_sql(query_stats, emit_labels)
+    return sql, query_stats

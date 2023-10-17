@@ -1,6 +1,6 @@
 import traceback
 import pydoc
-import readline
+import readline  # noqa # pylint: disable=unused-import
 
 from typing import List
 from yaspin import yaspin
@@ -12,7 +12,7 @@ from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import QueryParser, QueryParserException
 from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
-from kgqa.FaissIndex import FaissIndex, FaissIndexDirectory
+from kgqa.FaissIndex import FaissIndexDirectory
 from kgqa.Database import Database
 from kgqa.SQLBackend import wqg2sql
 
@@ -47,7 +47,7 @@ def _handle_user_query(query: str):
             sql, stats = wqg2sql(wqg, stats)
 
         with yaspin(text="Executing Query on Wikidata..."):
-            results, columns = run_and_rank(sql, stats, wqg)
+            results, columns = run_and_rank(sql, wqg, stats)
 
         _display_query_results(results, columns)
     except QueryLexerException as err:
