@@ -4,14 +4,14 @@ from typing_extensions import override
 from kgqa.QueryParser import Variable
 
 from .QueryBackend import (
-    ColumnInfo,
-    EntityColumnInfo,
-    HeadEntityColumnInfo,
-    PropertyColumnInfo,
     QueryBackend,
 )
 from .QueryGraph import (
+    ColumnInfo,
+    EntityColumnInfo,
     ExecutableQueryGraph,
+    HeadEntityColumnInfo,
+    PropertyColumnInfo,
     QueryGraphId,
     QueryGraphNode,
     QueryStatistics,
@@ -21,14 +21,14 @@ from .QueryGraph import (
 class SQLBackend(QueryBackend):
     @override
     def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
-        SELECT, nums_and_cols_stats = self._construct_select()
+        SELECT, columns = self._construct_select()
         FROM = self._construct_from()
         WHERE = self._construct_where()
         query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
 
-        stats.add_nums_and_cols(*nums_and_cols_stats)
+        stats.set_column_info(columns)
         if emit_labels:
-            query = self._join_query_labels(query, stats.column_names)
+            query = self._join_query_labels(query, stats.columns)
         else:
             query = f"{query};"
 
@@ -56,21 +56,19 @@ class SQLBackend(QueryBackend):
             adrs.append(f"c{edge_id}.{so_type}")
         return adrs
 
-    def _construct_select(self) -> Tuple[str, Tuple[int, int, int, List[str]]]:
+    def _construct_select(self) -> Tuple[str, List[ColumnInfo]]:
         # NOTE We cut out some logic related to templated QueryGraphs.
         heads = []
-        column_names: List[str] = []
+        columns: List[ColumnInfo] = []
 
         # Select all properties
-        column: ColumnInfo
         for index, (_, edges) in enumerate(self.graph.edges.items()):
             # TODO(jlscheerer) Update this assertion, mimic legacy behavior.
             assert len(edges) == 1
             edge = edges[0]
 
-            column = PropertyColumnInfo(index=index, predicate=edge.predicate)
-            heads.append(f'c{index}.property AS "{column}"')
-            column_names.append(f"{column}")
+            columns.append(PropertyColumnInfo(index=index, predicate=edge.predicate))
+            heads.append(f'c{index}.property AS "{columns[-1]}"')
 
         # Select all anchors
         num_anchors = 0
@@ -79,9 +77,8 @@ class SQLBackend(QueryBackend):
                 num_anchors += 1
                 node_addr = self._get_all_sql_address_for_var(node.id_)[0]
 
-                column = EntityColumnInfo(entity=node.value)
-                heads.append(f'{node_addr} AS "{column}"')
-                column_names.append(f"{column}")
+                columns.append(EntityColumnInfo(entity=node.value))
+                heads.append(f'{node_addr} AS "{columns[-1]}"')
 
         # Select all head free vars.
         for hv_id in self.graph.head_var_ids:
@@ -89,18 +86,11 @@ class SQLBackend(QueryBackend):
             entity = self.graph.nodes[hv_id.value].value
             assert isinstance(entity, Variable)
 
-            column = HeadEntityColumnInfo(entity=entity)
+            columns.append(HeadEntityColumnInfo(entity=entity))
             adrs = self._get_all_sql_address_for_var(hv_id)
-            heads.append(f'{adrs[0]} AS "{column}"')
-            column_names.append(f"{column}")
+            heads.append(f'{adrs[0]} AS "{columns[-1]}"')
 
-        nums_and_cols_stats = (
-            len(self.graph.edges),
-            num_anchors,
-            len(self.graph.head_var_ids),
-            column_names,
-        )
-        return ", ".join(heads), nums_and_cols_stats
+        return ", ".join(heads), columns
 
     def _construct_where_join_condition(
         self, where_conds: List[str], all_adrs: List[str]
@@ -151,12 +141,13 @@ class SQLBackend(QueryBackend):
         #     )
         return " AND ".join(where_conds)
 
-    def _strip_id_if_needed(self, column_name: str) -> str:
+    def _strip_id_if_needed(self, column: ColumnInfo) -> str:
+        column_name = f"{column}"
         if column_name.endswith(" (pid)") or column_name.endswith(" (qid)"):
             return column_name[: -len(" (pid)")]
         return column_name
 
-    def _join_query_labels(self, query: str, column_names: List[str]) -> str:
+    def _join_query_labels(self, query: str, column_names: List[ColumnInfo]) -> str:
         selections = ", ".join(
             [
                 f'oq."{column}", l{index}.value AS "{self._strip_id_if_needed(column)} (label)"'

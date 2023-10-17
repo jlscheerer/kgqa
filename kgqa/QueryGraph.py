@@ -2,8 +2,9 @@ import abc
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, cast
+from typing import Any, Dict, List, Set, Tuple, Type, cast
 from typing_extensions import override
+
 
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
 
@@ -19,31 +20,81 @@ from .QueryParser import (
 
 
 @dataclass
+class ColumnInfo(abc.ABC):
+    @abc.abstractmethod
+    def __repr__(self) -> str:
+        """
+        Constructs a serializable name for the column.
+        """
+        pass
+
+
+@dataclass
+class PropertyColumnInfo(ColumnInfo):
+    index: int  # TODO(jlscheerer) We should probably abstract this.
+    predicate: PredicateType
+
+    @override
+    def __repr__(self) -> str:
+        return f"{self.predicate.query_name()} ({self.index}) (pid)"
+
+
+@dataclass
+class EntityColumnInfo(ColumnInfo):
+    entity: ArgumentType
+
+    @override
+    def __repr__(self) -> str:
+        if isinstance(self.entity, StringConstant):
+            return f"{self.entity.value} (qid)"
+        elif isinstance(self.entity, Variable):
+            return f"Variable({self.entity.name}) (qid)"
+        elif isinstance(self.entity, IDConstant):
+            return f"IDConstant({self.entity.value}) (qid)"
+
+        # TODO(jlscheerer) Eventually we need to handle different types here.
+        assert False
+
+
+@dataclass
+class HeadEntityColumnInfo(EntityColumnInfo):
+    """
+    Entity that occurs in the head of a query.
+    """
+
+    entity: Variable
+
+    @override
+    def __repr__(self) -> str:
+        return f"Variable({self.entity.name})"
+
+
+@dataclass
 class QueryStatistics:
-    # TODO(jlscheerer) We need to extend this class to match the old behavior
     pid2scores: Dict[Any, Any] = field(default_factory=dict)
     qid2scores: Dict[Any, Any] = field(default_factory=dict)
 
-    num_predicates: int = -1
-    num_anchors: int = -1
-    num_heads: int = -1
-    column_names: List[str] = field(default_factory=list)
+    columns: List[ColumnInfo] = field(default_factory=list)
 
     def set_scores(self, pid2scores, qid2scores) -> None:
         self.pid2scores = pid2scores
         self.qid2scores = qid2scores
 
-    def add_nums_and_cols(
-        self,
-        num_predicates: int,
-        num_anchors: int,
-        num_heads: int,
-        column_names: List[str],
-    ) -> None:
-        self.num_predicates = num_predicates
-        self.num_anchors = num_anchors
-        self.num_heads = num_heads
-        self.column_names = column_names
+    def set_column_info(self, columns: List[ColumnInfo]) -> None:
+        self.columns = columns
+
+    def num_properties(self) -> int:
+        return self._count_of_type(PropertyColumnInfo)
+
+    def num_anchors(self) -> int:
+        # NOTE HeadEntityColumnInfo is derived from EntityColumnInfo.
+        return self._count_of_type(EntityColumnInfo) - self.num_heads()
+
+    def num_heads(self) -> int:
+        return self._count_of_type(HeadEntityColumnInfo)
+
+    def _count_of_type(self, type_: Type) -> int:
+        return len([column for column in self.columns if isinstance(column, type_)])
 
 
 @dataclass
@@ -73,7 +124,6 @@ class QueryGraphNode:
     id_: QueryGraphId
     is_free: bool
     value: ArgumentType
-
 
 
 @dataclass
