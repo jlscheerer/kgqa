@@ -74,11 +74,27 @@ class PropertyColumnInfo(ColumnInfo):
     def base_name(self) -> str:
         return f"{self.predicate.query_name()} ({self.index})"
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, PropertyColumnInfo):
+            return False
+        return self.index == other.index and self.predicate == other.predicate
+
+    def __hash__(self):
+        return hash((self.index, self.predicate))
+
 
 @dataclass
 class EntityColumnInfo(ColumnInfo):
     index: QueryGraphId  # ID of the Node in the QueryGraph representing the entity.
     entity: ArgumentType
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, EntityColumnInfo):
+            return False
+        return self.index == other.index and self.entity == other.entity
+
+    def __hash__(self):
+        return hash((self.index, self.entity))
 
 
 @dataclass
@@ -99,6 +115,12 @@ class AnchorEntityColumnInfo(EntityColumnInfo):
         # TODO(jlscheerer) Eventually we need to handle different types here.
         assert False
 
+    def __eq__(self, other) -> bool:
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
+
 
 @dataclass
 class HeadEntityColumnInfo(EntityColumnInfo):
@@ -115,6 +137,12 @@ class HeadEntityColumnInfo(EntityColumnInfo):
     @override
     def base_name(self) -> str:
         return f"Variable({self.entity.name})"
+
+    def __eq__(self, other) -> bool:
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
 
 
 @dataclass
