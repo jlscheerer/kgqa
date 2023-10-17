@@ -2,8 +2,9 @@ import abc
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Tuple, cast, reveal_type
+from typing import Any, Dict, List, Set, Tuple, Type, cast
 from typing_extensions import override
+
 
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
 
@@ -19,36 +20,11 @@ from .QueryParser import (
 
 
 @dataclass
-class QueryStatistics:
-    # TODO(jlscheerer) We need to extend this class to match the old behavior
-    pid2scores: Dict[Any, Any] = field(default_factory=dict)
-    qid2scores: Dict[Any, Any] = field(default_factory=dict)
-
-    num_predicates: int = -1
-    num_anchors: int = -1
-    num_heads: int = -1
-    column_names: List[str] = field(default_factory=list)
-
-    def set_scores(self, pid2scores, qid2scores) -> None:
-        self.pid2scores = pid2scores
-        self.qid2scores = qid2scores
-
-    def add_nums_and_cols(
-        self,
-        num_predicates: int,
-        num_anchors: int,
-        num_heads: int,
-        column_names: List[str],
-    ) -> None:
-        self.num_predicates = num_predicates
-        self.num_anchors = num_anchors
-        self.num_heads = num_heads
-        self.column_names = column_names
-
-
-@dataclass
 class QueryGraphId:
     value: int
+
+    def __repr__(self) -> str:
+        return f"QGID({self.value})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, QueryGraphId):
@@ -69,21 +45,110 @@ class QueryGraphIdGenerator:
 
 
 @dataclass
+class ColumnInfo(abc.ABC):
+    @abc.abstractmethod
+    def __repr__(self) -> str:
+        """
+        Constructs a serializable name for the column.
+        """
+        pass
+
+    @abc.abstractmethod
+    def base_name(self) -> str:
+        """
+        Constructs a serializable name that can be extended for additional columns.
+        """
+        pass
+
+
+@dataclass
+class PropertyColumnInfo(ColumnInfo):
+    index: int  # TODO(jlscheerer) We should probably abstract this.
+    predicate: PredicateType
+
+    @override
+    def __repr__(self) -> str:
+        return f"{self.base_name()} (pid)"
+
+    @override
+    def base_name(self) -> str:
+        return f"{self.predicate.query_name()} ({self.index})"
+
+
+@dataclass
+class EntityColumnInfo(ColumnInfo):
+    index: QueryGraphId  # ID of the Node in the QueryGraph representing the entity.
+    entity: ArgumentType
+
+
+@dataclass
+class AnchorEntityColumnInfo(EntityColumnInfo):
+    @override
+    def __repr__(self) -> str:
+        return f"{self.base_name()} (qid)"
+
+    @override
+    def base_name(self) -> str:
+        if isinstance(self.entity, StringConstant):
+            return f"{self.entity.value}"
+        elif isinstance(self.entity, Variable):
+            return f"Variable({self.entity.name})"
+        elif isinstance(self.entity, IDConstant):
+            return f"IDConstant({self.entity.value})"
+
+        # TODO(jlscheerer) Eventually we need to handle different types here.
+        assert False
+
+
+@dataclass
+class HeadEntityColumnInfo(EntityColumnInfo):
+    """
+    Entity that occurs in the head of a query.
+    """
+
+    entity: Variable
+
+    @override
+    def __repr__(self) -> str:
+        return self.base_name()
+
+    @override
+    def base_name(self) -> str:
+        return f"Variable({self.entity.name})"
+
+
+@dataclass
+class QueryStatistics:
+    pid2scores: Dict[Any, Any] = field(default_factory=dict)
+    qid2scores: Dict[Any, Any] = field(default_factory=dict)
+
+    columns: List[ColumnInfo] = field(default_factory=list)
+
+    def set_scores(self, pid2scores, qid2scores) -> None:
+        self.pid2scores = pid2scores
+        self.qid2scores = qid2scores
+
+    def set_column_info(self, columns: List[ColumnInfo]) -> None:
+        self.columns = columns
+
+    def num_properties(self) -> int:
+        return self._count_of_type(PropertyColumnInfo)
+
+    def num_anchors(self) -> int:
+        return self._count_of_type(AnchorEntityColumnInfo)
+
+    def num_heads(self) -> int:
+        return self._count_of_type(HeadEntityColumnInfo)
+
+    def _count_of_type(self, type_: Type) -> int:
+        return len([column for column in self.columns if isinstance(column, type_)])
+
+
+@dataclass
 class QueryGraphNode:
     id_: QueryGraphId
     is_free: bool
     value: ArgumentType
-
-    def to_str(self) -> str:
-        if isinstance(self.value, StringConstant):
-            return self.value.value
-        elif isinstance(self.value, Variable):
-            return f"Variable({self.value.name})"
-        elif isinstance(self.value, IDConstant):
-            return f"IDConstant({self.value.value})"
-
-        # TODO(jlscheerer) Eventually we need to handle different types here.
-        assert False
 
 
 @dataclass
