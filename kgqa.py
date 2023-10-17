@@ -7,6 +7,7 @@ from yaspin import yaspin
 from tabulate import tabulate
 from termcolor import colored
 
+from kgqa.Preferences import Preferences
 from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import QueryParser, QueryParserException
@@ -63,8 +64,9 @@ def _handle_user_query(query: str):
 
 def _handle_user_help() -> bool:
     print(".entity\t\t\tRetrieves similar entities")
-    print(".predicate\t\t\tRetrieves similar predicates")
+    print(".predicate\t\tRetrieves similar predicates")
     print(".search\t\t\tPerforms non-isomorphic search")
+    print(".set\t\t\tSet user preferences")
     print(".exit\t\t\tExit this program")
     return True
 
@@ -97,9 +99,24 @@ def _handle_builtin_predicate(args: List[str]) -> bool:
     return True
 
 
-def _handle_builtin_search(args) -> bool:
+def _handle_builtin_search(args: List[str]) -> bool:
     # TODO(jlscheerer) Perform non-isomorphic search
     print(".search NYI:", args)
+    return True
+
+
+def _handle_builtin_set(args: List[str]) -> bool:
+    if len(args) != 2:
+        print(
+            f"{colored('error', 'red', attrs=['bold'])}: {colored('illegal format for .set <key> <value>', 'white', attrs=['bold'])}"
+        )
+    else:
+        try:
+            Preferences().set(args[0], args[1])
+        except AssertionError as err:
+            print(
+                f"{colored('error', 'red', attrs=['bold'])}: {colored(err.args[0], 'white', attrs=['bold'])}"
+            )
     return True
 
 
@@ -115,6 +132,8 @@ def _handle_user_builtin(command: str) -> bool:
         return _handle_builtin_predicate(args)
     elif builtin == ".search":
         return _handle_builtin_search(args)
+    elif builtin == ".set":
+        return _handle_builtin_set(args)
     print(
         f'Error: unknown command or invalid arguments: "{builtin}". Enter ".help" for help'
     )

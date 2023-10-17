@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from typing import Tuple, List
 from typing_extensions import override
 
 from .QueryBackend import (
     QueryBackend,
+    QueryString,
 )
 from .QueryGraph import (
     AnchorEntityColumnInfo,
@@ -16,9 +18,14 @@ from .QueryGraph import (
 )
 
 
+@dataclass
+class SQLQuery(QueryString):
+    pass
+
+
 class SQLBackend(QueryBackend):
     @override
-    def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
+    def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> SQLQuery:
         SELECT = self._construct_select()
         FROM = self._construct_from()
         WHERE = self._construct_where()
@@ -30,7 +37,7 @@ class SQLBackend(QueryBackend):
         else:
             query = f"{query};"
 
-        return query
+        return SQLQuery(value=query)
 
     def _construct_from(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
