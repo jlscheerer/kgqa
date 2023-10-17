@@ -1,41 +1,25 @@
-from dataclasses import dataclass
-from typing import Dict, Tuple, List
+from typing import Tuple, List
+from typing_extensions import override
 
+from .QueryBackend import QueryBackend
 from .QueryGraph import (
     ExecutableQueryGraph,
-    QueryGraphEdge,
     QueryGraphId,
     QueryGraphNode,
     QueryStatistics,
 )
 
 
-@dataclass
-class SQL_IR:
-    graph: ExecutableQueryGraph
-    edge_list: List[Tuple[Tuple[QueryGraphId, QueryGraphId], List[QueryGraphEdge]]]
-    var2edges: Dict[QueryGraphId, List[Tuple[int, int]]]
-
-    def __init__(self, wqg: ExecutableQueryGraph):
-        self.graph = wqg
-
-        # TODO(jlscheerer) We probably want to flaten the inner edges.
-        self.edge_list = [(edge_id, edges) for edge_id, edges in wqg.edges.items()]
-
-        # Construct a mapping from each var to edge_id and position.
-        self.var2edges: Dict[QueryGraphId, List[Tuple[int, int]]] = dict()
-        for index, ((subj_id, obj_id), _) in enumerate(self.edge_list):
-            self.var2edges[subj_id] = self.var2edges.get(subj_id, []) + [(index, 1)]
-            self.var2edges[obj_id] = self.var2edges.get(obj_id, []) + [(index, 0)]
-
-    def to_sql(self, query_stats: QueryStatistics, emit_labels: bool = False) -> str:
+class SQL_IR(QueryBackend):
+    @override
+    def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
         SELECT, nums_and_cols_stats = self._construct_select()
-        query_stats.add_nums_and_cols(*nums_and_cols_stats)
+        stats.add_nums_and_cols(*nums_and_cols_stats)
         FROM = self._construct_from()
         WHERE = self._construct_where()
         query = f"""SELECT {SELECT} FROM {FROM} WHERE {WHERE}"""
         if emit_labels:
-            query = self._join_labels(query, query_stats.column_names)
+            query = self._join_labels(query, stats.column_names)
         else:
             query = f"{query};"
         return query
@@ -149,17 +133,15 @@ class SQL_IR:
         #     )
         return " AND ".join(where_conds)
 
-    def _strip_qid_if_needed(self, column_name: str) -> str:
-        if len(column_name) > 6 and (
-            column_name[-5:] == "(pid)" or column_name[-5:] == "(qid)"
-        ):
-            return column_name[:-6]
+    def _strip_id_if_needed(self, column_name: str) -> str:
+        if column_name.endswith(" (pid)") or column_name.endswith(" (qid)"):
+            return column_name[: -len(" (pid)")]
         return column_name
 
     def _join_labels(self, query: str, column_names: List[str]) -> str:
         selections = ", ".join(
             [
-                f'oq."{column}", l{index}.value AS "{self._strip_qid_if_needed(column)} (label)"'
+                f'oq."{column}", l{index}.value AS "{self._strip_id_if_needed(column)} (label)"'
                 for (index, column) in enumerate(column_names)
             ]
         )
@@ -175,7 +157,7 @@ class SQL_IR:
 
 
 def wqg2sql(
-    wqg: ExecutableQueryGraph, query_stats: QueryStatistics, emit_labels: bool = False
+    wqg: ExecutableQueryGraph, stats: QueryStatistics, emit_labels: bool = False
 ) -> Tuple[str, QueryStatistics]:
-    sql = SQL_IR(wqg).to_sql(query_stats, emit_labels)
-    return sql, query_stats
+    sql = SQL_IR(wqg).to_query(stats, emit_labels)
+    return sql, stats
