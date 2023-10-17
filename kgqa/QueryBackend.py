@@ -1,4 +1,6 @@
 import abc
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 from kgqa.QueryGraph import (
@@ -14,35 +16,45 @@ from kgqa.QueryGraph import (
 from kgqa.QueryParser import Variable
 
 
+@dataclass
+class VariableEdgeOccurrence:
+    edge_index: int
+    is_subj: bool
+
+
 class QueryBackend(abc.ABC):
     graph: ExecutableQueryGraph
-    edge_list: List[Tuple[Tuple[QueryGraphId, QueryGraphId], List[QueryGraphEdge]]]
 
-    # TODO(jlscheerer) Refactor this.
-    # Maps each node to the list of edges it occurs in. (index_of_edge, is_subj)
-    var2edges: Dict[QueryGraphId, List[Tuple[int, int]]]
+    # Tuples consisting of Subject, Object, Edge
+    edge_list: List[Tuple[QueryGraphId, QueryGraphId, QueryGraphEdge]]
+
+    # Maps each variable to the edges it occurs in.
+    var2edges: Dict[QueryGraphId, List[VariableEdgeOccurrence]]
 
     columns: List[ColumnInfo]
 
     def __init__(self, wqg: ExecutableQueryGraph):
         self.graph = wqg
-
-        # TODO(jlscheerer) We probably want to flaten the inner edges.
-        self.edge_list = [(edge_id, edges) for edge_id, edges in wqg.edges.items()]
+        self.edge_list = [
+            (subj_id, obj_id, edge)
+            for (subj_id, obj_id), edges in wqg.edges.items()
+            for edge in edges
+        ]
 
         # Construct a mapping from each var to edge_id and position.
-        self.var2edges: Dict[QueryGraphId, List[Tuple[int, int]]] = dict()
-        for index, ((subj_id, obj_id), _) in enumerate(self.edge_list):
-            self.var2edges[subj_id] = self.var2edges.get(subj_id, []) + [(index, 1)]
-            self.var2edges[obj_id] = self.var2edges.get(obj_id, []) + [(index, 0)]
+        var2edges = defaultdict(list)
+        for index, (subj_id, obj_id, _) in enumerate(self.edge_list):
+            var2edges[subj_id].append(
+                VariableEdgeOccurrence(edge_index=index, is_subj=True)
+            )
+            var2edges[obj_id].append(
+                VariableEdgeOccurrence(edge_index=index, is_subj=False)
+            )
+        self.var2edges = dict(var2edges)
 
         # Construct the required output columns: Properties, Anchors and Head Variables
         self.columns = []
-        for index, (_, edges) in enumerate(self.graph.edges.items()):
-            # TODO(jlscheerer) Temporary assumption to mimic legacy behavior
-            assert len(edges) == 1
-            edge = edges[0]
-
+        for index, (_, _, edge) in enumerate(self.edge_list):
             self.columns.append(
                 PropertyColumnInfo(index=index, predicate=edge.predicate)
             )
@@ -62,4 +74,13 @@ class QueryBackend(abc.ABC):
 
     @abc.abstractmethod
     def to_query(self, stats: QueryStatistics, emit_labels: bool = False) -> str:
+        """
+        Generates an executable query string through the QueryBackend.
+        """
         pass
+
+    def requires_filters(self) -> bool:
+        return len(self.graph.filter_var_ids) != 0
+
+    def requires_aggregation(self) -> bool:
+        raise AssertionError()

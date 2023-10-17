@@ -53,6 +53,13 @@ class ColumnInfo(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def base_name(self) -> str:
+        """
+        Constructs a serializable name that can be extended for additional columns.
+        """
+        pass
+
 
 @dataclass
 class PropertyColumnInfo(ColumnInfo):
@@ -61,7 +68,11 @@ class PropertyColumnInfo(ColumnInfo):
 
     @override
     def __repr__(self) -> str:
-        return f"{self.predicate.query_name()} ({self.index}) (pid)"
+        return f"{self.base_name()} (pid)"
+
+    @override
+    def base_name(self) -> str:
+        return f"{self.predicate.query_name()} ({self.index})"
 
 
 @dataclass
@@ -74,12 +85,16 @@ class EntityColumnInfo(ColumnInfo):
 class AnchorEntityColumnInfo(EntityColumnInfo):
     @override
     def __repr__(self) -> str:
+        return f"{self.base_name()} (qid)"
+
+    @override
+    def base_name(self) -> str:
         if isinstance(self.entity, StringConstant):
-            return f"{self.entity.value} (qid)"
+            return f"{self.entity.value}"
         elif isinstance(self.entity, Variable):
-            return f"Variable({self.entity.name}) (qid)"
+            return f"Variable({self.entity.name})"
         elif isinstance(self.entity, IDConstant):
-            return f"IDConstant({self.entity.value}) (qid)"
+            return f"IDConstant({self.entity.value})"
 
         # TODO(jlscheerer) Eventually we need to handle different types here.
         assert False
@@ -95,6 +110,10 @@ class HeadEntityColumnInfo(EntityColumnInfo):
 
     @override
     def __repr__(self) -> str:
+        return self.base_name()
+
+    @override
+    def base_name(self) -> str:
         return f"Variable({self.entity.name})"
 
 
