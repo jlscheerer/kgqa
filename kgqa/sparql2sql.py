@@ -1,4 +1,5 @@
 from enum import Enum, auto
+import inspect
 from typing import Generic, List, Tuple, TypeVar, Union, Optional
 from dataclasses import dataclass
 
@@ -22,6 +23,11 @@ class Variable:
 
     def __repr__(self):
         return f"?{self.name}"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, Variable):
+            return False
+        return self.name == other.name
 
 
 @dataclass
@@ -132,7 +138,7 @@ def _parse_sparql_expr(expr) -> Expression:
         lhs = _parse_sparql_expr(expr["expr"])
         op = expr["op"]
         rhs = _parse_sparql_expr(expr["other"])
-        return BinaryExpression(lhs, op, rhs)
+        return BinaryExpression(lhs, BinaryExpressionType[op], rhs)
     # We have a list of subexpressions
     return [_parse_sparql_expr(subexpr) for subexpr in expr]
 
@@ -183,3 +189,104 @@ def parse_sparql_query(query: str) -> ParsedSPARQLQuery:
     triples, filter = _parse_sparql_where(parsed["where"])
 
     return ParsedSPARQLQuery(projection, triples, filter)
+
+
+class SQLTranspiler:
+    query: ParsedSPARQLQuery
+    base_table: str
+
+    def __init__(self, query: ParsedSPARQLQuery, base_table: str = "claims_5m_inv"):
+        print(query)
+        self.query = query
+        self.base_table = base_table
+
+    def to_query(self) -> str:
+        SELECT = self._emit_sql_select()
+        FROM = self._emit_sql_from()
+        WHERE = self._emit_sql_where()
+
+        return inspect.cleandoc(
+            f"""SELECT {SELECT}
+                FROM {FROM}
+                WHERE {WHERE};"""
+        )
+
+    def _emit_sql_select(self) -> str:
+        projections: List[str] = []
+        for column in self.query.projection:
+            ref = self._find_reference(column)
+            projections.append(f'{ref} AS "{column}"')
+        return ", ".join(projections)
+
+    def _emit_sql_from(self) -> str:
+        if self.query.triples is not None:
+            return ", ".join(
+                [
+                    f"{self.base_table} c{index}"
+                    for index in range(len(self.query.triples))
+                ]
+            )
+        raise AssertionError("trying to convert SPARQL query without triples to SQL.")
+
+    def _emit_sql_where(self) -> str:
+        where_conds: List[str] = []
+        # TODO(jlscheerer) add the triple conditions...
+
+        # add the filter conditions
+        if self.query.filters is not None:
+            for filter in self.query.filters:
+                # NOTE we only support the Literal "True" and the BinaryExpression "IN"
+                if isinstance(filter, Literal):
+                    assert isinstance(filter.value, bool)
+                    assert filter.value
+                    where_conds.append("true")
+                elif isinstance(filter, BinaryExpression):
+                    if filter.op != BinaryExpressionType.IN:
+                        raise AssertionError(
+                            f"unsupported binary expression in SPARQL query: {filter.op}"
+                        )
+                    if not isinstance(filter.lhs, Variable):
+                        raise AssertionError(
+                            f"unsupported left-hand side in 'IN' expression: {filter.lhs}"
+                        )
+                    if not isinstance(filter.rhs, list):
+                        raise AssertionError(
+                            f"unsupported right-hand side in 'IN' expression: {filter.rhs}"
+                        )
+                    for element in filter.rhs:
+                        if not isinstance(element, PName) or element.prefix not in (
+                            "wdt",
+                            "wd",
+                        ):
+                            raise AssertionError(
+                                f"unsupported expression in 'IN' expression: {element}"
+                            )
+                    id_list = ", ".join(
+                        [f"'{element.localname}'" for element in filter.rhs]  # type: ignore
+                    )
+                    where_conds.append(f'"{filter.lhs}" IN ({id_list})')
+                else:
+                    raise AssertionError(
+                        f"unsupported filter in SPARQL query: {filter}"
+                    )
+
+        assert len(where_conds) > 0
+        return " AND ".join(where_conds)
+
+    def _find_reference(self, var: Variable) -> str:
+        if self.query.triples is None:
+            raise AssertionError(
+                f"trying to find reference for variable ' {var}' with empty triples."
+            )
+        for index, triple in enumerate(self.query.triples):
+            if var == triple.subj:
+                return f"c{index}.entity_id"
+            elif var == triple.pred:
+                return f"c{index}.property"
+            elif var == triple.obj:
+                return f"c{index}.datavalue_entity"
+        raise AssertionError(f"could not find reference for variable: {var}")
+
+
+def sparql2sql(query: str) -> str:
+    return SQLTranspiler(parse_sparql_query(query)).to_query()
