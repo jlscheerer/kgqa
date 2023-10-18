@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 from kgqa.QueryGraph import (
     AnchorEntityColumnInfo,
     ColumnInfo,
+    EntityColumnInfo,
     ExecutableQueryGraph,
     HeadEntityColumnInfo,
     PropertyColumnInfo,
@@ -91,6 +92,14 @@ class QueryBackend(abc.ABC):
 
     def requires_aggregation(self) -> bool:
         raise AssertionError()
+
+    def _column_by_node_id(self, node_id: QueryGraphId) -> EntityColumnInfo:
+        # TODO(jlscheerer) We can definitely improve this.
+        for column in self.columns:
+            if isinstance(column, EntityColumnInfo):
+                if column.index == node_id:
+                    return column
+        raise AssertionError("attempting to get column info for invalid node")
 
     def _column_by_edge_index(self, index: int) -> PropertyColumnInfo:
         # TODO(jlscheerer) We can definitely improve this.

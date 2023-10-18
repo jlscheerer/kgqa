@@ -53,18 +53,27 @@ class SPARQLBackend(QueryBackend):
         )
 
     def _construct_where(self) -> str:
-        return "?X wdt:P57 wd:Q3772 ."
+        triples: List[str] = []
+        for index, (subj_id, obj_id, _) in enumerate(self.edge_list):
+            subj = self._sparql_name_for_column(self._column_by_node_id(subj_id))
+            obj = self._sparql_name_for_column(self._column_by_node_id(obj_id))
+            pred = self._sparql_name_for_column(self._column_by_edge_index(index))
+            triples.append(f"{subj} {pred} {obj} .")
+        return "\n".join(triples)
 
     def _construct_filter(self) -> str:
-        # TODO(jlscheerer) We also need to add filters for the QIDs
         filters: List[str] = []
 
         assert not self.requires_filters()
 
+        for node_id, qids in self.graph.matched_anchors_qids.items():
+            column = self._sparql_name_for_column(self._column_by_node_id(node_id))
+            filters.append(f"{column} IN ({self._construct_qid_list(qids)})")
+
         for index, (_, _, edge) in enumerate(self.edge_list):
-            column = self._column_by_edge_index(index)
+            column = self._sparql_name_for_column(self._column_by_edge_index(index))
             filters.append(
-                f"{self._sparql_name_for_column(column)} IN ({self._construct_pid_list(edge.get_matched_pids())})"
+                f"{column} IN ({self._construct_pid_list(edge.get_matched_pids())})"
             )
 
         if len(filters) == 0:
@@ -73,6 +82,9 @@ class SPARQLBackend(QueryBackend):
 
     def _construct_pid_list(self, pids: List[str]) -> str:
         return ", ".join([f"wdt:{pid}" for pid in pids])
+
+    def _construct_qid_list(self, qids: List[str]) -> str:
+        return ", ".join([f"wd:{qid}" for qid in qids])
 
     def _sparql_name_for_column(self, column: ColumnInfo) -> str:
         if column in self.col2name:
