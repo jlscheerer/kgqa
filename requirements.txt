@@ -10,3 +10,4 @@ openai
 tabulate
 pandas
 termcolor
+rdflib
