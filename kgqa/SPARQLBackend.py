@@ -44,6 +44,7 @@ class SPARQLBackend(QueryBackend):
         )
 
         stats.set_column_info(self.columns)
+        stats.meta["col2name"] = self.col2name
 
         return SPARQLQuery(value=query)
 

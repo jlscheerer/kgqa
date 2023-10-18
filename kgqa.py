@@ -8,6 +8,7 @@ from tabulate import tabulate
 from termcolor import colored
 
 from kgqa.Preferences import Preferences
+from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import QueryParser, QueryParserException
@@ -46,6 +47,7 @@ def _handle_user_query(query: str):
             wqg, stats = aqg2wqg(aqg, stats)
 
         backend = Preferences()["backend"]
+        qs: QueryString
         if backend == "SQL":
             with yaspin(text="Emitting SQL Code..."):
                 qs, stats = wqg2sql(wqg, stats)

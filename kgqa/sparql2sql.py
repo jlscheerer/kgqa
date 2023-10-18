@@ -7,6 +7,9 @@ from numpy import isin
 from rdflib.plugins import sparql
 from rdflib import term
 
+from kgqa.SPARQLBackend import SPARQLQuery
+from kgqa.SQLBackend import SQLQuery
+
 T = TypeVar("T")
 
 
@@ -200,7 +203,6 @@ class SQLTranspiler:
     base_table: str
 
     def __init__(self, query: ParsedSPARQLQuery, base_table: str = "claims_5m_inv"):
-        print(query)
         self.query = query
         self.base_table = base_table
 
@@ -326,5 +328,5 @@ class SQLTranspiler:
         return refs
 
 
-def sparql2sql(query: str) -> str:
-    return SQLTranspiler(parse_sparql_query(query)).to_query()
+def sparql2sql(query: SPARQLQuery) -> SQLQuery:
+    return SQLQuery(value=SQLTranspiler(parse_sparql_query(query.value)).to_query())

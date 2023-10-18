@@ -147,10 +147,14 @@ class HeadEntityColumnInfo(EntityColumnInfo):
 
 @dataclass
 class QueryStatistics:
+    # TODO(jlscheerer) We should introduce types here.
     pid2scores: Dict[Any, Any] = field(default_factory=dict)
     qid2scores: Dict[Any, Any] = field(default_factory=dict)
 
     columns: List[ColumnInfo] = field(default_factory=list)
+
+    # Any additional information emitted by the backend.
+    meta: Dict[str, Any] = field(default_factory=dict)
 
     def set_scores(self, pid2scores, qid2scores) -> None:
         self.pid2scores = pid2scores
