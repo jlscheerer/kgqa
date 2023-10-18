@@ -56,6 +56,7 @@ class SPARQLBackend(QueryBackend):
         return "?X wdt:P57 wd:Q3772 ."
 
     def _construct_filter(self) -> str:
+        # TODO(jlscheerer) We also need to add filters for the QIDs
         filters: List[str] = []
 
         assert not self.requires_filters()

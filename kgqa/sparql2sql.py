@@ -1,7 +1,8 @@
 from enum import Enum, auto
 import inspect
-from typing import Generic, List, Tuple, TypeVar, Union, Optional
+from typing import Generic, List, Set, Tuple, TypeVar, Union, Optional
 from dataclasses import dataclass
+from numpy import isin
 
 from rdflib.plugins import sparql
 from rdflib import term
@@ -28,6 +29,9 @@ class Variable:
         if not isinstance(other, Variable):
             return False
         return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
 
 
 @dataclass
@@ -214,7 +218,7 @@ class SQLTranspiler:
     def _emit_sql_select(self) -> str:
         projections: List[str] = []
         for column in self.query.projection:
-            ref = self._find_reference(column)
+            ref = self._find_references(column)[0]
             projections.append(f'{ref} AS "{column}"')
         return ", ".join(projections)
 
@@ -231,6 +235,9 @@ class SQLTranspiler:
     def _emit_sql_where(self) -> str:
         where_conds: List[str] = []
         # TODO(jlscheerer) add the triple conditions...
+        for var in self._collect_all_vars():
+            refs = self._find_references(var)
+            where_conds.append(self._emit_eq_constraint(refs))
 
         # add the filter conditions
         if self.query.filters is not None:
@@ -264,7 +271,8 @@ class SQLTranspiler:
                     id_list = ", ".join(
                         [f"'{element.localname}'" for element in filter.rhs]  # type: ignore
                     )
-                    where_conds.append(f'"{filter.lhs}" IN ({id_list})')
+                    ref = self._find_references(filter.lhs)[0]
+                    where_conds.append(f"{ref} IN ({id_list})")
                 else:
                     raise AssertionError(
                         f"unsupported filter in SPARQL query: {filter}"
@@ -273,19 +281,49 @@ class SQLTranspiler:
         assert len(where_conds) > 0
         return " AND ".join(where_conds)
 
-    def _find_reference(self, var: Variable) -> str:
+    def _emit_eq_constraint(self, refs: List[str]) -> str:
+        refs += [refs[0]]
+        cond = [f"{refs[index]} = {refs[index + 1]}" for index in range(len(refs) - 1)]
+        return " AND ".join(cond)
+
+    def _collect_all_vars(self) -> Set[Variable]:
+        vars: Set[Variable] = set()
+        for var in self.query.projection:
+            vars.add(var)
+
+        if self.query.triples is not None:
+            for triple in self.query.triples:
+                if isinstance(triple.subj, Variable):
+                    vars.add(triple.subj)
+                if isinstance(triple.pred, Variable):
+                    vars.add(triple.pred)
+                if isinstance(triple.obj, Variable):
+                    vars.add(triple.obj)
+
+        if self.query.filters is not None:
+            for filter in self.query.filters:
+                if isinstance(filter, BinaryExpression):
+                    if isinstance(filter.lhs, Variable):
+                        vars.add(filter.lhs)
+
+        return vars
+
+    def _find_references(self, var: Variable) -> List[str]:
+        refs: List[str] = []
         if self.query.triples is None:
             raise AssertionError(
                 f"trying to find reference for variable ' {var}' with empty triples."
             )
         for index, triple in enumerate(self.query.triples):
             if var == triple.subj:
-                return f"c{index}.entity_id"
+                refs.append(f"c{index}.entity_id")
             elif var == triple.pred:
-                return f"c{index}.property"
+                refs.append(f"c{index}.property")
             elif var == triple.obj:
-                return f"c{index}.datavalue_entity"
-        raise AssertionError(f"could not find reference for variable: {var}")
+                refs.append(f"c{index}.datavalue_entity")
+        if len(refs) == 0:
+            raise AssertionError(f"could not find reference for variable: {var}")
+        return refs
 
 
 def sparql2sql(query: str) -> str:
