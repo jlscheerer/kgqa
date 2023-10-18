@@ -145,6 +145,6 @@ class SQLBackend(QueryBackend):
 
 def wqg2sql(
     wqg: ExecutableQueryGraph, stats: QueryStatistics, emit_labels: bool = False
-) -> Tuple[str, QueryStatistics]:
+) -> Tuple[SQLQuery, QueryStatistics]:
     sql = SQLBackend(wqg).to_query(stats, emit_labels)
     return sql, stats
