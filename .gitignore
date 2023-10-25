@@ -1,6 +1,7 @@
 config.yaml
 preferences.yaml
 data
+cache
 
 .DS_Store
 ._*

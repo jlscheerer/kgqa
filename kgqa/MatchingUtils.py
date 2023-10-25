@@ -29,7 +29,9 @@ def compute_similar_predicates(predicate: str) -> Tuple[List[str], List[float]]:
 
 
 # TODO(jlscheerer) Reimplment alias handling logic here.
-def compute_similar_entity_ids(entity: str) -> Tuple[List[str], List[float]]:
+def compute_similar_entity_ids(
+    entity: str, num_qids=None
+) -> Tuple[List[str], List[float]]:
     """
     For a given entity specified in english, returns a list of lists of the follwing form:
         [prob:int, qid:str, label:str, id:int]
@@ -38,7 +40,8 @@ def compute_similar_entity_ids(entity: str) -> Tuple[List[str], List[float]]:
     Returns top-num_qids such entities.
     """
     config = Config()
-    num_qids = config["NumTopQID"]
+    if num_qids is None:
+        num_qids = config["NumTopQID"]
     pid_to_score = FaissIndexDirectory().labels.search(entity, num_qids)
     pids_scores = sorted(
         [(pid, score) for pid, score in pid_to_score.items()],

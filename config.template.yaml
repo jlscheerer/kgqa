@@ -9,7 +9,11 @@ psql:
   user: <<TODO_ADD_PSQL_USERNAME_HERE>>
   pwd: <<TODO_ADD_PSQL_PASSWORD_HERE>>
 
+prompt_builder:
+  directory: "./prompts"
+
 language_model:
+  directory: "./cache"
   openai_api_key: <<TODO_ADD_OPENAI_API_KEY_HERE>>
 
 # Label Embeddings
