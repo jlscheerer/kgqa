@@ -72,13 +72,13 @@ class Database(metaclass=Singleton):
         raise AssertionError("NYI")
 
     def get_qid_to_title(self, qid):
-        raise AssertionError("NYI")
+        return self.fetchall(f"SELECT value FROM labels_en WHERE id = '{qid}'")[0][0]
 
     def get_pid_to_titles(self, pids):
         raise AssertionError("NYI")
 
     def get_pid_to_title(self, pid):
-        raise AssertionError("NYI")
+        return self.fetchall(f"SELECT value FROM labels_en WHERE id = '{pid}'")[0][0]
 
     def get_description_for_id(self, id):
         return self.fetchall(

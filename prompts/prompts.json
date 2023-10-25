@@ -1,0 +1,6 @@
+{
+  "PROMINENT_EXAMPLES": {
+    "template": "./examples.prompt.txt",
+    "response": "semicolon_separated_lines"
+  }
+}

@@ -1,0 +1,14 @@
+Given a predicate, you must reply with extremely prominent examples of such a relationship.
+
+Given grandchild_of you could respond with:
+Barack Obama Sr. ; Malia Obama
+Elizabeth II ; Prince Harry
+Albert Einstein ; David Einstein
+
+Given starred_in_movie_by
+Samuel L. Jackson ; Quentin Tarantino
+Mark Hamill ; George Lucas
+Sean Connery ; Guy Hamilton
+
+Name exactly three prominent examples of the relationship ${RELATIONSHIP}.
+Answer only with the examples in the specified format and include no further text or information.
