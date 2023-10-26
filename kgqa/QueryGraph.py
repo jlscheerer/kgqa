@@ -148,15 +148,19 @@ class HeadEntityColumnInfo(EntityColumnInfo):
 @dataclass
 class QueryStatistics:
     # TODO(jlscheerer) We should introduce types here.
-    pid2scores: Dict[Any, Any] = field(default_factory=dict)
-    qid2scores: Dict[Any, Any] = field(default_factory=dict)
+    pid2scores: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    qid2scores: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     columns: List[ColumnInfo] = field(default_factory=list)
 
     # Any additional information emitted by the backend.
     meta: Dict[str, Any] = field(default_factory=dict)
 
-    def set_scores(self, pid2scores, qid2scores) -> None:
+    def set_scores(
+        self,
+        pid2scores: Dict[str, Dict[str, float]],
+        qid2scores: Dict[str, Dict[str, float]],
+    ) -> None:
         self.pid2scores = pid2scores
         self.qid2scores = qid2scores
 
@@ -290,7 +294,7 @@ def _construct_aqg_from_pq(pq: ParsedQuery) -> AbstractQueryGraph:
     )
 
 
-def _match_predicates(wqg: ExecutableQueryGraph):
+def _match_predicates(wqg: ExecutableQueryGraph) -> Dict[str, Dict[str, float]]:
     pred_to_pid_to_score = dict()
     for _, edges in wqg.edges.items():
         for edge in edges:
@@ -307,7 +311,7 @@ def _match_predicates(wqg: ExecutableQueryGraph):
     return pred_to_pid_to_score
 
 
-def _match_entities(wqg: ExecutableQueryGraph):
+def _match_entities(wqg: ExecutableQueryGraph) -> Dict[str, Dict[str, float]]:
     ent_to_qid_to_score = dict()
     for node in wqg.nodes:
         if not node.is_free:
