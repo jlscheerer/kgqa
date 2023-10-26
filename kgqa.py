@@ -6,6 +6,7 @@ from typing import List
 from yaspin import yaspin
 from tabulate import tabulate
 from termcolor import colored
+from kgqa.NonIsomorphicSearch import infer_n_hops_predicate
 
 from kgqa.Preferences import Preferences
 from kgqa.QueryBackend import QueryString
@@ -112,8 +113,15 @@ def _handle_builtin_predicate(args: List[str]) -> bool:
 
 
 def _handle_builtin_search(args: List[str]) -> bool:
-    # TODO(jlscheerer) Perform non-isomorphic search
-    print(".search NYI:", args)
+    # TODO(jlscheerer) Extend this scope of this builtin.
+    try:
+        assert len(args) == 2
+        hops = int(args[0])
+        predicate = args[1]
+
+        infer_n_hops_predicate(predicate, n=hops)
+    except:
+        print("usage: .search <n-hops> <predicate>")
     return True
 
 
