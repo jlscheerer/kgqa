@@ -2,7 +2,6 @@ from enum import Enum, auto
 import inspect
 from typing import Generic, List, Set, Tuple, TypeVar, Union, Optional
 from dataclasses import dataclass
-from numpy import isin
 
 from rdflib.plugins import sparql
 from rdflib import term
@@ -50,7 +49,32 @@ class PName:
         return f"{self.prefix}:{self.localname}"
 
 
-Expression = Union[Literal, Variable, PName, "BinaryExpression", List["Expression"]]
+EXPR_AGGREGATE_TYPES = [
+    "Aggregate_Count",
+    "Aggregate_Sum",
+    "Aggregate_Avg",
+    "Aggregate_Min",
+    "Aggregate_Max",
+    "Aggregate_Sample",
+    "Aggregate_GroupConcat",
+]
+
+
+@dataclass
+class AggregateExpression:
+    type_: str
+    distinct: bool
+    var: Variable
+
+
+Expression = Union[
+    Literal,
+    Variable,
+    PName,
+    AggregateExpression,
+    "BinaryExpression",
+    List["Expression"],
+]
 
 
 class BinaryExpressionType(Enum):
@@ -62,6 +86,12 @@ class BinaryExpression:
     lhs: Expression
     op: BinaryExpressionType
     rhs: Expression
+
+
+@dataclass
+class NamedExpression:
+    name: Variable
+    expression: Expression
 
 
 TripleConstituent = Union[Variable, PName]
@@ -76,9 +106,10 @@ class Triple:
 
 @dataclass
 class ParsedSPARQLQuery:
-    projection: List[Variable]
+    projection: List[Union[Variable, NamedExpression]]
     triples: Optional[List[Triple]]
     filters: Optional[List[Expression]]
+    group_by: Optional[List[Variable]]
 
 
 def _parse_sparql_variable(var: term.Variable) -> Variable:
@@ -93,11 +124,21 @@ def _parse_sparql_literal(literal: term.Literal) -> Literal:
     return Literal(value=literal.value)
 
 
-def _parse_sparql_projection(projection) -> List[Variable]:
-    vars: List[Variable] = []
-    for var in [x["var"] for x in projection]:
-        assert isinstance(var, term.Variable)
-        vars.append(_parse_sparql_variable(var))
+def _parse_sparql_projection(projection) -> List[Union[Variable, NamedExpression]]:
+    vars: List[Union[Variable, NamedExpression]] = []
+    for element in projection:
+        if "var" in element:
+            var = element["var"]
+            assert isinstance(var, term.Variable)
+            vars.append(_parse_sparql_variable(var))
+            continue
+        assert "evar" in element
+        vars.append(
+            NamedExpression(
+                name=_parse_sparql_variable(element["evar"]),
+                expression=_parse_sparql_expr(element["expr"]),
+            )
+        )
     return vars
 
 
@@ -130,6 +171,7 @@ def _parse_sparql_triples(triples) -> List[Triple]:
 
 
 def _parse_sparql_expr(expr) -> Expression:
+    # print(expr)
     if isinstance(expr, list):
         # We have a list of subexpressions
         return [_parse_sparql_expr(subexpr) for subexpr in expr]
@@ -137,6 +179,13 @@ def _parse_sparql_expr(expr) -> Expression:
         return _parse_sparql_variable(expr)
     elif isinstance(expr, term.Literal):
         return _parse_sparql_literal(expr)
+    elif expr.name in EXPR_AGGREGATE_TYPES:
+        distinct = bool(expr["distinct"])
+        var = _parse_sparql_expr(expr["vars"])
+        assert isinstance(var, Variable)
+        return AggregateExpression(
+            type_=expr.name[len("Aggregate_") :].upper(), distinct=distinct, var=var
+        )
     elif set(expr.keys()) == {"prefix", "localname"}:
         return _parse_sparql_pname(expr)
     elif set(expr.keys()) == {"expr"}:
@@ -190,12 +239,20 @@ def _parse_sparql_where(
     return triples, filter
 
 
+def _parse_sparql_group_by(group_by):
+    assert group_by.name == "GroupClause"
+    return [_parse_sparql_variable(var) for var in group_by["condition"]]
+
+
 def parse_sparql_query(query: str) -> ParsedSPARQLQuery:
     parsed = sparql.parser.parseQuery(query)[1]
     projection = _parse_sparql_projection(parsed["projection"])
     triples, filter = _parse_sparql_where(parsed["where"])
+    group_by = (
+        _parse_sparql_group_by(parsed["groupby"]) if "groupby" in parsed else None
+    )
 
-    return ParsedSPARQLQuery(projection, triples, filter)
+    return ParsedSPARQLQuery(projection, triples, filter, group_by)
 
 
 class SQLTranspiler:
@@ -210,19 +267,38 @@ class SQLTranspiler:
         SELECT = self._emit_sql_select()
         FROM = self._emit_sql_from()
         WHERE = self._emit_sql_where()
+        GROUP_BY = str()
+        if self.query.group_by is not None:
+            GROUP_BY = f"GROUP BY {self._emit_sql_group_by(self.query.group_by)}"
 
         return inspect.cleandoc(
             f"""SELECT {SELECT}
                 FROM {FROM}
-                WHERE {WHERE};"""
+                WHERE {WHERE}
+                {GROUP_BY};"""
         )
 
     def _emit_sql_select(self) -> str:
         projections: List[str] = []
         for column in self.query.projection:
-            ref = self._find_references(column)[0]
-            projections.append(f'{ref} AS "{column}"')
+            if isinstance(column, Variable):
+                ref = self._find_references(column)[0]
+                projections.append(f'{ref} AS "{column}"')
+            elif isinstance(column, NamedExpression):
+                assert isinstance(column.expression, AggregateExpression)
+                projections.append(
+                    f'{self._emit_aggregate(column.expression)} AS "{column.name}"'
+                )
+            else:
+                assert False
         return ", ".join(projections)
+
+    def _emit_aggregate(self, aggregate: AggregateExpression) -> str:
+        distinct = "DISTINCT " if aggregate.distinct else ""
+        ref = self._find_references(aggregate.var)[0]
+        if aggregate.type_ in ["COUNT", "MIN", "MAX", "SUM"]:
+            return f"{aggregate.type_}({distinct}{ref})"
+        raise AssertionError(f"unsupported aggregate expression '{aggregate.type_}'")
 
     def _emit_sql_from(self) -> str:
         if self.query.triples is not None:
@@ -283,6 +359,9 @@ class SQLTranspiler:
         assert len(where_conds) > 0
         return " AND ".join(where_conds)
 
+    def _emit_sql_group_by(self, group_by: List[Variable]):
+        return ", ".join([f'"{self._find_references(var)[0]}"' for var in group_by])
+
     def _emit_eq_constraint(self, refs: List[str]) -> str:
         refs += [refs[0]]
         cond = [f"{refs[index]} = {refs[index + 1]}" for index in range(len(refs) - 1)]
@@ -290,8 +369,12 @@ class SQLTranspiler:
 
     def _collect_all_vars(self) -> Set[Variable]:
         vars: Set[Variable] = set()
-        for var in self.query.projection:
-            vars.add(var)
+        for element in self.query.projection:
+            if isinstance(element, Variable):
+                vars.add(element)
+            elif isinstance(element, NamedExpression):
+                assert isinstance(element.expression, AggregateExpression)
+                vars.add(element.expression.var)
 
         if self.query.triples is not None:
             for triple in self.query.triples:
