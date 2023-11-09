@@ -5,6 +5,7 @@ from typing_extensions import override
 
 from kgqa.QueryBackend import QueryBackend, QueryString
 from kgqa.QueryGraph import (
+    AggregateColumnInfo,
     AnchorEntityColumnInfo,
     ColumnInfo,
     ExecutableQueryGraph,
@@ -54,7 +55,7 @@ class SPARQLBackend(QueryBackend):
 
     def _construct_select(self) -> str:
         return " ".join(
-            [self._sparql_name_for_column(column) for column in self.columns]
+            [self._construct_select_for_column(column) for column in self.columns]
         )
 
     def _construct_where(self) -> str:
@@ -89,7 +90,9 @@ class SPARQLBackend(QueryBackend):
         assert self.graph.requires_group_by()
         group_by = []
         for column in self.columns:
-            if not isinstance(column, HeadEntityColumnInfo):
+            if isinstance(column, AnchorEntityColumnInfo) or isinstance(
+                column, PropertyColumnInfo
+            ):
                 group_by.append(column)
         return " ".join(map(self._sparql_name_for_column, group_by))
 
@@ -98,6 +101,15 @@ class SPARQLBackend(QueryBackend):
 
     def _construct_qid_list(self, qids: List[str]) -> str:
         return ", ".join([f"wd:{qid}" for qid in qids])
+
+    def _construct_select_for_column(self, column: ColumnInfo) -> str:
+        if isinstance(column, AggregateColumnInfo):
+            assert not column.distinct
+            variable = self._sparql_name_for_column(
+                self._column_by_node_id(column.index)
+            )
+            return f"({column.type_.name}({variable}) AS ?Z{column.aggregate_index})"
+        return self._sparql_name_for_column(column)
 
     def _sparql_name_for_column(self, column: ColumnInfo) -> str:
         if column in self.col2name:
@@ -109,6 +121,8 @@ class SPARQLBackend(QueryBackend):
             self.col2name[column] = f"?A{len(self.col2name)}"
         elif isinstance(column, HeadEntityColumnInfo):
             self.col2name[column] = f"?H{len(self.col2name)}"
+        elif isinstance(column, AggregateColumnInfo):
+            self.col2name[column] = f"?G{len(self.col2name)}"
 
         return self.col2name[column]
 

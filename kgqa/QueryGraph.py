@@ -10,6 +10,7 @@ from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predi
 
 from .QueryParser import (
     Aggregation,
+    AggregationType,
     ArgumentType,
     IDConstant,
     ParsedQuery,
@@ -139,6 +140,30 @@ class HeadEntityColumnInfo(EntityColumnInfo):
     @override
     def base_name(self) -> str:
         return f"Variable({self.entity.name})"
+
+    def __eq__(self, other) -> bool:
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
+
+
+@dataclass
+class AggregateColumnInfo(EntityColumnInfo):
+    entity: Variable
+    type_: AggregationType
+    distinct: bool
+
+    aggregate_index: int
+
+    @override
+    def __repr__(self) -> str:
+        return self.base_name()
+
+    @override
+    def base_name(self) -> str:
+        # TODO Adjust this to reflect the concrete aggregation.
+        return f"Aggregation({self.entity.name})"
 
     def __eq__(self, other) -> bool:
         return super().__eq__(other)
