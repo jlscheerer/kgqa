@@ -300,10 +300,11 @@ class QueryParser:
         # Aggregations are not yet supported.
         for item in pq.head:
             if isinstance(item, Aggregation):
-                raise QueryParserException(
-                    item.token,
-                    f"aggregation {item.type_.name}(_) not yet supported",
-                )
+                if item.type_.name not in ["COUNT", "MIN", "MAX"]:
+                    raise QueryParserException(
+                        item.token,
+                        f"aggregation {item.type_.name}(_) not yet supported",
+                    )
 
         # We only support unary/binary predicates
         for clause in pq.clauses:

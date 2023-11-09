@@ -9,11 +9,14 @@ from typing_extensions import override
 from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
 
 from .QueryParser import (
+    Aggregation,
+    AggregationType,
     ArgumentType,
     IDConstant,
     ParsedQuery,
     PredicateType,
     QueryFilter,
+    QueryHead,
     StringConstant,
     Variable,
 )
@@ -146,6 +149,29 @@ class HeadEntityColumnInfo(EntityColumnInfo):
 
 
 @dataclass
+class AggregateColumnInfo(EntityColumnInfo):
+    entity: Variable
+    type_: AggregationType
+    distinct: bool
+
+    aggregate_index: int
+
+    @override
+    def __repr__(self) -> str:
+        return self.base_name()
+
+    @override
+    def base_name(self) -> str:
+        return f"{self.type_}({self.entity.name})"
+
+    def __eq__(self, other) -> bool:
+        return super().__eq__(other)
+
+    def __hash__(self):
+        return super().__hash__()
+
+
+@dataclass
 class QueryStatistics:
     # TODO(jlscheerer) We should introduce types here.
     pid2scores: Dict[str, Dict[str, float]] = field(default_factory=dict)
@@ -207,11 +233,17 @@ class QueryGraph(abc.ABC):
     # NOTE: Fixes a previous issues where two nodes could not share multiple predicates.
     edges: Dict[Tuple[QueryGraphId, QueryGraphId], List[QueryGraphEdge]]
 
-    head_var_ids: List[QueryGraphId]
+    head: QueryHead
     filter_var_ids: Set[QueryGraphId]
 
     filters: List[QueryFilter]
     anchors: List[ArgumentType]
+
+    def requires_group_by(self) -> bool:
+        for column in self.head.items:
+            if isinstance(column, Aggregation):
+                return True
+        return False
 
     def is_cyclic(self):
         return len(self.edges) == len(self.nodes)
@@ -280,14 +312,11 @@ def _construct_aqg_from_pq(pq: ParsedQuery) -> AbstractQueryGraph:
         i, j = arg2id[subj], arg2id[obj]
         edges[(i, j)].append(QueryGraphEdge(predicate=pred))
 
-    # TODO(jlscheerer) Assumes head only contains vars, i.e., no Aggregation support
-    head_var_ids = [arg2id[x] for x in pq.head]  # type: ignore
-
     return AbstractQueryGraph(
         arg2id=arg2id,
         nodes=nodes,
         edges=dict(edges),
-        head_var_ids=head_var_ids,
+        head=deepcopy(pq.head),
         filter_var_ids=filter_var_ids,
         filters=pq.filters,
         anchors=cast(List[ArgumentType], predicates) + anchors,
@@ -339,7 +368,7 @@ def aqg2wqg(
         arg2id=deepcopy(aqg.arg2id),
         nodes=deepcopy(aqg.nodes),
         edges=deepcopy(aqg.edges),
-        head_var_ids=deepcopy(aqg.head_var_ids),
+        head=deepcopy(aqg.head),
         filter_var_ids=deepcopy(aqg.filter_var_ids),
         filters=deepcopy(aqg.filters),
         anchors=deepcopy(aqg.anchors),

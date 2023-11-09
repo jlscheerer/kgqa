@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 from kgqa.QueryGraph import (
+    AggregateColumnInfo,
     AnchorEntityColumnInfo,
     ColumnInfo,
     EntityColumnInfo,
@@ -14,7 +15,7 @@ from kgqa.QueryGraph import (
     QueryGraphId,
     QueryStatistics,
 )
-from kgqa.QueryParser import Variable
+from kgqa.QueryParser import Aggregation, AggregationType, Variable
 
 
 @dataclass
@@ -38,6 +39,7 @@ class QueryBackend(abc.ABC):
     var2edges: Dict[QueryGraphId, List[VariableEdgeOccurrence]]
 
     columns: List[ColumnInfo]
+    aggregate_columns: List[HeadEntityColumnInfo]
 
     def __init__(self, wqg: ExecutableQueryGraph):
         self.graph = wqg
@@ -71,12 +73,29 @@ class QueryBackend(abc.ABC):
                     AnchorEntityColumnInfo(index=node.id_, entity=node.value)
                 )
 
-        for head_var_id in self.graph.head_var_ids:
-            # NOTE As entity occurs in the head of the query, it must be a variable.
-            entity = self.graph.nodes[head_var_id.value].value
-            assert isinstance(entity, Variable)
-
-            self.columns.append(HeadEntityColumnInfo(index=head_var_id, entity=entity))
+        aggregate_index = 0
+        for head_var in self.graph.head:
+            if isinstance(head_var, Variable):
+                head_var_id = self.graph.arg2id[head_var]
+                self.columns.append(
+                    HeadEntityColumnInfo(index=head_var_id, entity=head_var)
+                )
+            elif isinstance(head_var, Aggregation):
+                # Create a "virtual column" for variables in aggregates.
+                # TODO(jlscheerer) This is not supported by the "native" SQL-Backend.
+                head_var_id = self.graph.arg2id[head_var.var]
+                self.columns.append(
+                    AggregateColumnInfo(
+                        index=head_var_id,
+                        entity=head_var.var,
+                        type_=head_var.type_,
+                        distinct=False,
+                        aggregate_index=aggregate_index,
+                    )
+                )
+                aggregate_index += 1
+            else:
+                assert False
 
     @abc.abstractmethod
     def to_query(
@@ -97,6 +116,9 @@ class QueryBackend(abc.ABC):
         # TODO(jlscheerer) We can definitely improve this.
         for column in self.columns:
             if isinstance(column, EntityColumnInfo):
+                if column.index == node_id:
+                    return column
+            elif isinstance(column, AggregateColumnInfo):
                 if column.index == node_id:
                     return column
         raise AssertionError("attempting to get column info for invalid node")
