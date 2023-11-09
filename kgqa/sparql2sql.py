@@ -360,7 +360,7 @@ class SQLTranspiler:
         return " AND ".join(where_conds)
 
     def _emit_sql_group_by(self, group_by: List[Variable]):
-        return ", ".join([f'"{self._find_references(var)[0]}"' for var in group_by])
+        return ", ".join([f"{self._find_references(var)[0]}" for var in group_by])
 
     def _emit_eq_constraint(self, refs: List[str]) -> str:
         refs += [refs[0]]

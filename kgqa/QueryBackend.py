@@ -14,7 +14,7 @@ from kgqa.QueryGraph import (
     QueryGraphId,
     QueryStatistics,
 )
-from kgqa.QueryParser import Variable
+from kgqa.QueryParser import Aggregation, Variable
 
 
 @dataclass
@@ -38,6 +38,7 @@ class QueryBackend(abc.ABC):
     var2edges: Dict[QueryGraphId, List[VariableEdgeOccurrence]]
 
     columns: List[ColumnInfo]
+    aggregate_columns: List[HeadEntityColumnInfo]
 
     def __init__(self, wqg: ExecutableQueryGraph):
         self.graph = wqg
@@ -71,12 +72,22 @@ class QueryBackend(abc.ABC):
                     AnchorEntityColumnInfo(index=node.id_, entity=node.value)
                 )
 
-        for head_var_id in self.graph.head_var_ids:
-            # NOTE As entity occurs in the head of the query, it must be a variable.
-            entity = self.graph.nodes[head_var_id.value].value
-            assert isinstance(entity, Variable)
-
-            self.columns.append(HeadEntityColumnInfo(index=head_var_id, entity=entity))
+        self.aggregate_columns = []
+        for head_var in self.graph.head:
+            if isinstance(head_var, Variable):
+                head_var_id = self.graph.arg2id[head_var]
+                self.columns.append(
+                    HeadEntityColumnInfo(index=head_var_id, entity=head_var)
+                )
+            elif isinstance(head_var, Aggregation):
+                # Create a "virtual column" for variables in aggregates.
+                # TODO(jlscheerer) This is not supported by the "native" SQL-Backend.
+                head_var_id = self.graph.arg2id[head_var.var]
+                self.aggregate_columns.append(
+                    HeadEntityColumnInfo(index=head_var_id, entity=head_var.var)
+                )
+            else:
+                assert False
 
     @abc.abstractmethod
     def to_query(
@@ -99,6 +110,10 @@ class QueryBackend(abc.ABC):
             if isinstance(column, EntityColumnInfo):
                 if column.index == node_id:
                     return column
+        # Search for "virtual column" in case it refers to an aggregate variable
+        for column in self.aggregate_columns:
+            if column.index == node_id:
+                return column
         raise AssertionError("attempting to get column info for invalid node")
 
     def _column_by_edge_index(self, index: int) -> PropertyColumnInfo:

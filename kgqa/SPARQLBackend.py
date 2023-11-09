@@ -33,6 +33,9 @@ class SPARQLBackend(QueryBackend):
         SELECT = self._construct_select()
         WHERE = self._construct_where()
         FILTER = self._construct_filter()
+        GROUP_BY = str()
+        if self.graph.requires_group_by():
+            GROUP_BY = f"GROUP BY {self._construct_group_by()}"
         query = self._dedent_query(
             f"""SELECT {SELECT}
                 WHERE
@@ -40,7 +43,8 @@ class SPARQLBackend(QueryBackend):
                     {WHERE}
                     FILTER(\t{FILTER})
                     SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-                }}"""
+                }}
+                {GROUP_BY}"""
         )
 
         stats.set_column_info(self.columns)
@@ -80,6 +84,14 @@ class SPARQLBackend(QueryBackend):
         if len(filters) == 0:
             return "True"
         return " &&\n\t\t\t\t".join(filters)
+
+    def _construct_group_by(self) -> str:
+        assert self.graph.requires_group_by()
+        group_by = []
+        for column in self.columns:
+            if not isinstance(column, HeadEntityColumnInfo):
+                group_by.append(column)
+        return " ".join(map(self._sparql_name_for_column, group_by))
 
     def _construct_pid_list(self, pids: List[str]) -> str:
         return ", ".join([f"wdt:{pid}" for pid in pids])
