@@ -5,9 +5,9 @@ from kgqa.Database import Database
 from kgqa.Preferences import Preferences
 from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import (
+    AggregateColumnInfo,
     AnchorEntityColumnInfo,
     ColumnInfo,
-    EntityColumnInfo,
     ExecutableQueryGraph,
     HeadEntityColumnInfo,
     PropertyColumnInfo,
@@ -38,7 +38,12 @@ def run_and_rank(query: QueryString, wqg: ExecutableQueryGraph, stats: QueryStat
         db = Database()
         results, column_names = db.fetchall(sql.value, return_column_names=True)
 
-        if column_names != [col2name[column] for column in stats.columns]:
+        if column_names != [
+            f"?Z{column.aggregate_index}"
+            if isinstance(column, AggregateColumnInfo)
+            else col2name[column]
+            for column in stats.columns
+        ]:
             raise AssertionError("received unexpected table format from database")
     else:
         raise AssertionError(f"cannot run_and_rank query '{query}'")
@@ -62,9 +67,16 @@ def run_and_rank(query: QueryString, wqg: ExecutableQueryGraph, stats: QueryStat
                 score = stats.qid2scores[node.value.value][id]
             elif isinstance(col, HeadEntityColumnInfo):
                 score = None  # Entity is retrieved. Thus, we have no score
+            elif isinstance(col, AggregateColumnInfo):
+                score = None
             else:
                 assert False
-            annotated_row.append(f"{db.get_pid_to_title(id)} ({id}) [f={score}]")
+            if isinstance(col, AggregateColumnInfo):
+                annotated_row.append(
+                    id
+                )  # id is actually the value of the aggregate in this case.
+            else:
+                annotated_row.append(f"{db.get_pid_to_title(id)} ({id}) [f={score}]")
             if score is not None:
                 row_score *= score
         annotated_row.append(row_score)

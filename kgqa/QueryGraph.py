@@ -162,8 +162,7 @@ class AggregateColumnInfo(EntityColumnInfo):
 
     @override
     def base_name(self) -> str:
-        # TODO Adjust this to reflect the concrete aggregation.
-        return f"Aggregation({self.entity.name})"
+        return f"{self.type_}({self.entity.name})"
 
     def __eq__(self, other) -> bool:
         return super().__eq__(other)
