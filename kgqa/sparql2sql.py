@@ -151,6 +151,8 @@ def _parse_triple_constituent(constituent) -> TripleConstituent:
     if isinstance(constituent, term.Variable):
         return _parse_sparql_variable(constituent)
     elif isinstance(constituent, list):
+        # TODO(jlscheerer) Support 9.1 Property Path Syntax
+        # print(*[x for x in constituent], sep="\n")
         assert len(constituent) == 1
         return _parse_triple_constituent(constituent[0])
     elif set(constituent.keys()) == {"prefix", "localname"}:
@@ -160,14 +162,26 @@ def _parse_triple_constituent(constituent) -> TripleConstituent:
     return _parse_triple_constituent(constituent["part"])
 
 
-def _parse_sparql_triple(triple) -> Triple:
-    assert len(triple) == 3
+def _parse_sparql_triple(triple) -> List[Triple]:
     constituents = [_parse_triple_constituent(constituent) for constituent in triple]
-    return Triple(subj=constituents[0], pred=constituents[1], obj=constituents[2])
+
+    # NOTE we can have multiple triples here as part of (4.2.1 Predicate-Object Lists)
+    assert len(constituents) > 0 and len(constituents) % 3 == 0
+    return [
+        Triple(
+            subj=constituents[offset + 0],
+            pred=constituents[offset + 1],
+            obj=constituents[offset + 2],
+        )
+        for offset in range(0, len(constituents), 3)
+    ]
 
 
 def _parse_sparql_triples(triples) -> List[Triple]:
-    return [_parse_sparql_triple(triple) for triple in triples]
+    ptriples: List[Triple] = []
+    for triple in triples:
+        ptriples.extend(_parse_sparql_triple(triple))
+    return ptriples
 
 
 def _parse_sparql_expr(expr) -> Expression:
