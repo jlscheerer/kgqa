@@ -215,7 +215,7 @@ def _parse_sparql_filter(filter) -> List[Expression]:
 
 
 def _parse_sparql_where(
-    where,
+    where, assert_wiki=True
 ) -> Tuple[Optional[List[Triple]], Optional[List[Expression]]]:
     triples = None
     filter = None
@@ -234,8 +234,8 @@ def _parse_sparql_where(
             assert "graph" in constituent
 
             is_wiki_service = True
-
-    assert is_wiki_service
+    if assert_wiki:
+        assert is_wiki_service
     return triples, filter
 
 
@@ -244,10 +244,10 @@ def _parse_sparql_group_by(group_by):
     return [_parse_sparql_variable(var) for var in group_by["condition"]]
 
 
-def parse_sparql_query(query: str) -> ParsedSPARQLQuery:
+def parse_sparql_query(query: str, assert_wiki=True) -> ParsedSPARQLQuery:
     parsed = sparql.parser.parseQuery(query)[1]
     projection = _parse_sparql_projection(parsed["projection"])
-    triples, filter = _parse_sparql_where(parsed["where"])
+    triples, filter = _parse_sparql_where(parsed["where"], assert_wiki=assert_wiki)
     group_by = (
         _parse_sparql_group_by(parsed["groupby"]) if "groupby" in parsed else None
     )
@@ -259,7 +259,7 @@ class SQLTranspiler:
     query: ParsedSPARQLQuery
     base_table: str
 
-    def __init__(self, query: ParsedSPARQLQuery, base_table: str = "claims_5m_inv"):
+    def __init__(self, query: ParsedSPARQLQuery, base_table: str):
         self.query = query
         self.base_table = base_table
 
@@ -267,15 +267,20 @@ class SQLTranspiler:
         SELECT = self._emit_sql_select()
         FROM = self._emit_sql_from()
         WHERE = self._emit_sql_where()
-        GROUP_BY = str()
+        GROUP_BY = None
         if self.query.group_by is not None:
             GROUP_BY = f"GROUP BY {self._emit_sql_group_by(self.query.group_by)}"
+            return inspect.cleandoc(
+                f"""SELECT {SELECT}
+                    FROM {FROM}
+                    WHERE {WHERE}
+                    {GROUP_BY};"""
+            )
 
         return inspect.cleandoc(
             f"""SELECT {SELECT}
                 FROM {FROM}
-                WHERE {WHERE}
-                {GROUP_BY};"""
+                WHERE {WHERE};"""
         )
 
     def _emit_sql_select(self) -> str:
@@ -312,7 +317,32 @@ class SQLTranspiler:
 
     def _emit_sql_where(self) -> str:
         where_conds: List[str] = []
-        # TODO(jlscheerer) add the triple conditions...
+
+        # add the triple condition constraints
+        if self.query.triples is not None:
+            for index, triple in enumerate(self.query.triples):
+                if not isinstance(triple.subj, Variable):
+                    assert isinstance(triple.subj, PName)
+                    where_conds.append(
+                        self._emit_eq_literal_constraint(
+                            f"c{index}.entity_id", triple.subj.localname
+                        )
+                    )
+                if not isinstance(triple.pred, Variable):
+                    assert isinstance(triple.pred, PName)
+                    where_conds.append(
+                        self._emit_eq_literal_constraint(
+                            f"c{index}.property", triple.pred.localname
+                        )
+                    )
+                if not isinstance(triple.obj, Variable):
+                    assert isinstance(triple.obj, PName)
+                    where_conds.append(
+                        self._emit_eq_literal_constraint(
+                            f"c{index}.datavalue_entity", triple.obj.localname
+                        )
+                    )
+
         for var in self._collect_all_vars():
             refs = self._find_references(var)
             where_conds.append(self._emit_eq_constraint(refs))
@@ -361,6 +391,9 @@ class SQLTranspiler:
 
     def _emit_sql_group_by(self, group_by: List[Variable]):
         return ", ".join([f"{self._find_references(var)[0]}" for var in group_by])
+
+    def _emit_eq_literal_constraint(self, field: str, literal: str):
+        return f"{field} = '{literal}'"
 
     def _emit_eq_constraint(self, refs: List[str]) -> str:
         refs += [refs[0]]
@@ -411,5 +444,12 @@ class SQLTranspiler:
         return refs
 
 
-def sparql2sql(query: SPARQLQuery) -> SQLQuery:
-    return SQLQuery(value=SQLTranspiler(parse_sparql_query(query.value)).to_query())
+def sparql2sql(
+    query: SPARQLQuery, base_table="claims_5m_inv", assert_wiki=True
+) -> SQLQuery:
+    return SQLQuery(
+        value=SQLTranspiler(
+            parse_sparql_query(query.value, assert_wiki=assert_wiki),
+            base_table=base_table,
+        ).to_query()
+    )
