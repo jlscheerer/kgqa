@@ -29,7 +29,7 @@ mkdir csv
 ruby migrador.rb
 ```
 
-3. Follow the instruction outlined in the repository to clone and build [`wd-migrate`](https://github.com/jlscheerer/wd-migrate). Use this tool to convert the previously generated output into a format easily understandable by postgres using.
+3. Follow the instruction outlined in the repository to clone and build [`wd-migrate`](https://github.com/jlscheerer/wd-migrate). Run the tool to convert the previously generated output into a format easily understandable by postgres:
 ```sh
 ./wd_migrate.o claims csv/claims.txt csv/claims.csv
 ./wd_migrate.o qualifiers csv/qualifiers.txt csv/qualifiers.csv
