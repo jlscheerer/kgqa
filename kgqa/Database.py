@@ -81,9 +81,12 @@ class Database(metaclass=Singleton):
         return self.fetchall(f"SELECT value FROM labels_en WHERE id = '{pid}'")[0][0]
 
     def get_description_for_id(self, id):
-        return self.fetchall(
-            f"SELECT value FROM descriptions WHERE id = '{id}' AND language = 'en'"
-        )[0][0]
+        descriptions =  self.fetchall(
+            f"SELECT value FROM descriptions_en WHERE id = '{id}'"
+        )
+        if len(descriptions) > 0:
+            return descriptions[0][0]
+        return None
 
     def __del__(self):
         if self._conn is not None:

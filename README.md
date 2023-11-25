@@ -29,19 +29,25 @@ mkdir csv
 ruby migrador.rb
 ```
 
-3. Set up a `wikidata` database in [`postgres`](https://www.postgresql.org) with `UTF-8` encoding.
+3. Follow the instruction outlined in the repository to clone and build [`wd-migrate`](https://github.com/jlscheerer/wd-migrate). Use this tool to convert the previously generated output into a format easily understandable by postgres using.
+```sh
+./wd_migrate.o claims csv/claims.txt csv/claims.csv
+./wd_migrate.o qualifiers csv/qualifiers.txt csv/qualifiers.csv
+```
+
+4. Set up a `wikidata` database in [`postgres`](https://www.postgresql.org) with `UTF-8` encoding.
 
 ```postgres
 CREATE DATABASE wikidata WITH encoding = 'UTF8';
 ```
 
-4. Populate the database using the [`sql/setup.sql`](sql/setup.sql) script.
+5. Populate the database using the [`sql/setup.sql`](sql/setup.sql) script.
 
 ```sh
 psql -U $PSQL_USERNAME -d wikidata -f sql/setup.sql
 ```
 
-5. Create and customize the configuration file `./config.yaml`. See [`config.template.yaml`](config.template.yaml) for the required parameters.
+6. Create and customize the configuration file `./config.yaml`. See [`config.template.yaml`](config.template.yaml) for the required parameters.
 
 ```sh
 cp config.template.yaml config.yaml
@@ -55,17 +61,17 @@ In particular, this requires configuring the following parameters:
 | `psql.password`               | `postgres` password                                  |
 | `language_model.open_api_key` | [OpenAI API Key](https://openai.com/blog/openai-api) |
 
-6. To install the project's dependencies execute the following command.
+7. To install the project's dependencies execute the following command.
 ```sh
 pip3 install -r requirements.txt
 ```
 
-7. Next, generate the required embeddings via the provided setup script.
+8. Next, generate the required embeddings via the provided setup script.
 ```sh
 python3 setup.py ComputeEmbeddings
 ```
 
-8. Finally, populate the `claims` table with *invertible* predicates by running the supplied script.
+9. Finally, populate the `claims` table with *invertible* predicates by running the supplied script.
 
 ```sh
 python3 setup.py InvertPredicates

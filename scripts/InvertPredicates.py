@@ -98,22 +98,15 @@ def _construct_inv_predicate_table():
 
     print(f"Counting {len(invertible_predicates)} / {len(predicates)} as invertible.")
 
-    with yaspin(text="Populating claims_5m_inv Table...") as sp:
-        db.execute("DROP TABLE IF EXISTS claims_5m_inv")
-        db.execute(
-            "CREATE TABLE claims_5m_inv AS (SELECT *, False as inverse FROM claims_5m);"
-        )
-        sp.ok("✔ ")
-
-    with yaspin(text="Populating claims_5m_inv Table (Inverted Predicates)...") as sp:
+    with yaspin(text="Populating claims_inv Table (Inverted Predicates)...") as sp:
         escaped_invertible_predicates = [f"'{pid}'" for pid in invertible_predicates]
         sql = f"""
-        INSERT INTO claims_5m_inv
-        SELECT datavalue_entity AS entity_id, id, type, rank, snaktype,
-               property, datavalue_string, entity_id AS datavalue_entity,
-               datavalue_date, datavalue_type, datatype, True as inverse
-        FROM claims_5m
-        WHERE property IN ({', '.join(escaped_invertible_predicates)});
+        INSERT INTO claims_inv
+        SELECT datavalue_entity AS entity_id, id, property, datavalue_type, datavalue_string, 
+               entity_id AS datavalue_entity, datavalue_date, datavalue_quantity, True AS inverse
+        FROM claims_inv
+        WHERE datavalue_type = 'wikibase-entityid'
+          AND property IN ({', '.join(escaped_invertible_predicates)});
         """
         db.execute(sql)
         sp.ok("✔ ")
@@ -124,15 +117,15 @@ def _construct_inv_predicate_table():
 def _construct_inv_predicate_idx():
     db = Database()
 
-    with yaspin(text="Constructing Indexes for claims_5m_inv Table...") as sp:
+    with yaspin(text="Constructing Indexes for claims_inv Table...") as sp:
         db.execute(
-            "CREATE INDEX idx_claims_5m_inv_datavalue_entity ON claims_5m_inv (datavalue_entity);"
+            "CREATE INDEX idx_claims_inv_entity_id ON claims_inv (entity_id);"
         )
         db.execute(
-            "CREATE INDEX idx_claims_5m_inv_entity_id ON claims_5m_inv (entity_id);"
+            "CREATE INDEX idx_claims_inv_datavalue_entity ON claims_inv (datavalue_entity);"
         )
         db.execute(
-            "CREATE INDEX idx_claims_5m_inv_property ON claims_5m_inv (property);"
+            "CREATE INDEX idx_claims_inv_property ON claims_inv (property);"
         )
 
         db.commit()

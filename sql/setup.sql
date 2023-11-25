@@ -26,7 +26,6 @@ CREATE TYPE claims_datavalue_type AS enum (
 );
 
 -- CREATE TABLES --
-
 CREATE TABLE entities (
   id VARCHAR(16) PRIMARY KEY, 
   type entity_type, 
@@ -34,33 +33,24 @@ CREATE TABLE entities (
 );
 
 CREATE TABLE claims (
- entity_id        VARCHAR(16) REFERENCES entities(id),
- id               VARCHAR(64) PRIMARY KEY,
- type             claims_type,
- rank             claims_rank,
- snaktype         claims_snaktype,
- property         VARCHAR(16) REFERENCES entities(id),
- datavalue_string TEXT,
- datavalue_entity VARCHAR(64),
- datavalue_date   VARCHAR(16),
- datavalue_type   claims_datavalue_type,
- datatype         claims_datatype
+ entity_id              VARCHAR(16) REFERENCES entities(id),
+ id                     VARCHAR(64) PRIMARY KEY,
+ property               VARCHAR(16) REFERENCES entities(id),
+ datavalue_type         claims_datavalue_type,
+ datavalue_string       TEXT,
+ datavalue_entity       VARCHAR(16),
+ datavalue_date         TIMESTAMP,
+ datavalue_quantity     DOUBLE PRECISION -- NUMERIC(256, 128)
 );
 
 CREATE TABLE qualifiers (
- claim_id           VARCHAR(64) REFERENCES claims(id),
- property           VARCHAR(16) REFERENCES entities(id),
- hash               VARCHAR(64),
- snaktype           claims_snaktype,
- qualifier_property VARCHAR(16) REFERENCES entities(id),
- datavalue_string   TEXT,
- datavalue_entity   VARCHAR(64),
- datavalue_date     VARCHAR(16),
- remove_me_later    TEXT,
- datavalue_type     claims_datavalue_type,
- datatype           claims_datatype,
- counter            VARCHAR(4),
- order_hash         VARCHAR(2)
+ claim_id               VARCHAR(64) REFERENCES claims(id),
+ qualifier_property     VARCHAR(16) REFERENCES entities(id),
+ datavalue_type         claims_datavalue_type,
+ datavalue_string       TEXT,
+ datavalue_entity       VARCHAR(16),
+ datavalue_date         TIMESTAMP,
+ datavalue_quantity     DOUBLE PRECISION -- NUMERIC(256, 128)
 );
 
 CREATE TABLE labels (
@@ -85,15 +75,29 @@ CREATE TABLE descriptions (
 
 \copy entities from 'csv/entities.txt' DELIMITER E'\t'
 
-\copy claims from 'csv/labels.txt' DELIMITER E'\t'
+-- `claims` requires additional preprocessing through wd-migrate.
+\copy claims FROM 'csv/claims.csv' DELIMITER E'\t' NULL '';
 
-\copy qualifiers from 'csv/qualifiers.txt' DELIMITER E'\t'
+CREATE TABLE claims_inv AS (
+  SELECT entity_id, id, property, datavalue_type, datavalue_string, datavalue_entity,
+         datavalue_date, datavalue_quantity, False as inverse
+  FROM claims
+);
+DROP TABLE claims;
+
+-- `qualifiers` requires additional preprocessing through wd-migrate.
+\copy qualifiers FROM 'csv/qualifiers.csv' DELIMITER E'\t' NULL '';
 
 \copy labels from 'csv/labels.txt' DELIMITER E'\t'
 
 \copy aliases from 'csv/aliases.txt' DELIMITER E'\t'
 
 \copy descriptions from 'csv/descriptions.txt' DELIMITER E'\t'
+
+CREATE TABLE descriptions_en AS (
+  SELECT * FROM descriptions WHERE language = 'en'
+);
+DROP TABLE descriptions;
 
 -- CREATE MATERIALIZED VIEWS --
 
@@ -105,20 +109,15 @@ CREATE MATERIALIZED VIEW properties AS (
     SELECT DISTINCT property AS id, datatype AS value FROM claims
 );
 
-CREATE MATERIALIZED VIEW claims_5m AS (
-  SELECT * FROM claims
-  WHERE (((substring(entity_id from '[0-9]+$'))::BIGINT) <= 5000000)
-    AND (datavalue_entity IS NULL OR (((substring(entity_id from '[0-9]+$'))::BIGINT) <= 5000000))
+CREATE MATERIALIZED VIEW qualifier_properties AS (
+    SELECT DISTINCT qualifier_property AS id, property, datavalue_type AS value
+    FROM qualifiers
 );
 
 -- CREATE INDEXES --
-
-CREATE INDEX idx_claims_datavalue_entity ON claims (datavalue_entity);
-CREATE INDEX idx_claims_entity_id ON claims (entity_id);
-CREATE INDEX idx_claims_property ON claims (property);
-
 CREATE INDEX idx_qualifiers_claim_id ON qualifiers (claim_id);
-CREATE INDEX idx_qualifiers_datavalue_entity ON qualifiers (datavalue_entity);
-CREATE INDEX idx_qualifiers_property ON qualifiers (property);
 
-CREATE INDEX idx_descriptions_id ON descriptions (id);
+CREATE INDEX idx_labels_en_id ON labels_en (id);
+
+-- CREATE INDEX idx_descriptions_id ON descriptions (id); --
+CREATE INDEX idx_descriptions_en_id ON descriptions_en (id);
