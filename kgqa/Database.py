@@ -1,3 +1,4 @@
+import sys
 import psycopg2
 import numpy as np
 
@@ -31,17 +32,20 @@ class Database(metaclass=Singleton):
             f"dbname={config['psql']['db']} user={config['psql']['user']} password={config['psql']['pwd']}"
         )
 
-        # TODO(jlscheerer) We can directly move this into the relations
-        labels = read_strs_from_file(
-            config.file_in_directory("embeddings", FILENAME_PROPERTY_LABELS)
-        )
-        embeddings = np.load(
-            config.file_in_directory("embeddings", FILENAME_PROPERTY_EMBEDDINGS)
-        )
-        ids = read_strs_from_file(
-            config.file_in_directory("embeddings", FILENAME_PROPERTY_IDS)
-        )
-        self.relations = Relations(labels, embeddings, ids)
+        try:
+            # TODO(jlscheerer) We can directly move this into the relations
+            labels = read_strs_from_file(
+                config.file_in_directory("embeddings", FILENAME_PROPERTY_LABELS)
+            )
+            embeddings = np.load(
+                config.file_in_directory("embeddings", FILENAME_PROPERTY_EMBEDDINGS)
+            )
+            ids = read_strs_from_file(
+                config.file_in_directory("embeddings", FILENAME_PROPERTY_IDS)
+            )
+            self.relations = Relations(labels, embeddings, ids)
+        except:
+            print("[Warning] Database unable to load embeddings. If you have not generated the embeddings yet ignore this warning.", file=sys.stderr)
 
     def cursor(self):
         return self._conn.cursor()

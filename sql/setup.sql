@@ -80,7 +80,7 @@ CREATE TABLE descriptions (
 
 CREATE TABLE claims_inv AS (
   SELECT entity_id, id, property, datavalue_type, datavalue_string, datavalue_entity,
-         datavalue_date, datavalue_quantity, False as inverse
+         datavalue_date, datavalue_quantity, False AS inverse
   FROM claims
 );
 DROP TABLE claims;
@@ -110,8 +110,9 @@ CREATE MATERIALIZED VIEW properties AS (
 );
 
 CREATE MATERIALIZED VIEW qualifier_properties AS (
-    SELECT DISTINCT qualifier_property AS id, property, datavalue_type AS value
-    FROM qualifiers
+    SELECT DISTINCT q.qualifier_property AS id, c.property, q.datavalue_type AS value
+    FROM qualifiers q, claims_inv c
+    WHERE q.claim_id = c.id AND c.inverse = False
 );
 
 -- CREATE INDEXES --
