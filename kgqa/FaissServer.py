@@ -5,29 +5,6 @@ from .RequestServer import RequestServer, request_handler
 from .FaissIndex import FaissIndexDirectory
 
 
-def compute_similar_predicates(predicate: str) -> Tuple[List[str], List[float]]:
-    """
-    For a given predicate specified in english, returns a list of predicates,
-    their ids, and assoc. probs in the form:
-        [prob:int, pid:str, label:str]
-    where each probability is the cosine similarity (inner product) with the given predicate.
-
-    Returns top-num_preds such entities.
-    """
-    config = Config()
-    pid_to_score = FaissIndexDirectory().properties.search(
-        predicate, config["NumTopPID"]
-    )
-    pids_scores = sorted(
-        [(pid, score) for pid, score in pid_to_score.items()],
-        key=lambda x: x[1],
-        reverse=True,
-    )
-    pids, scores = zip(*pids_scores)
-    return pids, scores  # type: ignore
-
-
-# TODO(jlscheerer) Reimplment alias handling logic here.
 def compute_similar_entity_ids(
     entity: str, num_qids=None
 ) -> Tuple[List[str], List[float]]:
@@ -41,14 +18,6 @@ def compute_similar_entity_ids(
     config = Config()
     if num_qids is None:
         num_qids = config["NumTopQID"]
-    pid_to_score = FaissIndexDirectory().labels.search(entity, num_qids)
-    pids_scores = sorted(
-        [(pid, score) for pid, score in pid_to_score.items()],
-        key=lambda x: x[1],
-        reverse=True,
-    )
-    pids, scores = zip(*pids_scores)
-    return pids, scores  # type: ignore
 
 
 class FaissServer(RequestServer):
@@ -58,16 +27,38 @@ class FaissServer(RequestServer):
     @request_handler
     def compute_similar_properties(self, data):
         predicate = data["property"]
-        # TODO(jlscheerer) Rename the function in MatchingUtils.
-        pids, scores = compute_similar_predicates(predicate)
-        self.write({"pids": pids, "scores": [float(x) for x in scores]})
+        num_pids = data["num_pids"]
+        pid_to_score = FaissIndexDirectory().properties.search(predicate, num_pids)
+        pids_scores = sorted(
+            [(pid, score) for pid, score in pid_to_score.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        pids, scores = zip(*pids_scores)
+        labels = [FaissIndexDirectory().labels.label_for_id(id) for id in pids]
+        self.write(
+            {
+                "pids": pids,
+                "scores": [float(x) for x in scores],
+                "labels": labels,
+            }
+        )
 
     @request_handler
     def compute_similar_entities(self, data):
         entity = data["entity"]
-        # TODO(jlscheerer) Rename the function in MatchingUtils and clean it up.
-        qids, scores = compute_similar_entity_ids(entity)
-        self.write({"qids": qids, "scores": [float(x) for x in scores]})
+        num_qids = data["num_qids"]
+        pid_to_score = FaissIndexDirectory().labels.search(entity, num_qids)
+        pids_scores = sorted(
+            [(pid, score) for pid, score in pid_to_score.items()],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        qids, scores = zip(*pids_scores)
+        labels = [FaissIndexDirectory().labels.label_for_id(id) for id in qids]
+        self.write(
+            {"qids": qids, "scores": [float(x) for x in scores], "labels": labels}
+        )
 
 
 if __name__ == "__main__":

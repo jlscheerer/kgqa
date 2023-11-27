@@ -5,7 +5,7 @@ from .Config import Config
 
 
 def compute_similar_entities(
-    entity: str, num_qids=None
+    entity: str, num_qids=None, return_labels=False
 ) -> Tuple[List[str], List[float]]:
     """
     For a given entity specified in english, returns a list of lists of the follwing form,
@@ -19,11 +19,17 @@ def compute_similar_entities(
     server = config["embeddings"]["server"]
     with RequestClient(server["host"], server["port"]) as client:
         response = client.compute_similar_entities(entity=entity, num_qids=num_qids)
+        if return_labels:
+            return (
+                response["qids"],
+                response["scores"],
+                response["labels"],
+            )  # type:ignore
         return response["qids"], response["scores"]
 
 
 def compute_similar_properties(
-    property: str, num_pids=None
+    property: str, num_pids=None, return_labels=False
 ) -> Tuple[List[str], List[float]]:
     """
     For a given property specified in english, returns a list of properties,
@@ -39,4 +45,10 @@ def compute_similar_properties(
         response = client.compute_similar_properties(
             property=property, num_pids=num_pids
         )
+        if return_labels:
+            return (
+                response["pids"],
+                response["scores"],
+                response["labels"],
+            )  # type:ignore
         return response["pids"], response["scores"]
