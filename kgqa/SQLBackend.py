@@ -42,7 +42,7 @@ class SQLBackend(QueryBackend):
     def _construct_from(self) -> str:
         # NOTE We cut out some logic related to templated QueryGraphs.
 
-        claims_relname = "claims_5m_inv"
+        claims_relname = "claims_inv"
         return ", ".join(
             [f"{claims_relname} c{index}" for index in range(len(self.edge_list))]
         )

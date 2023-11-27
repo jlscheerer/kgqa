@@ -459,7 +459,7 @@ class SQLTranspiler:
 
 
 def sparql2sql(
-    query: SPARQLQuery, base_table="claims_5m_inv", assert_wiki=True
+    query: SPARQLQuery, base_table="claims_inv", assert_wiki=True
 ) -> SQLQuery:
     return SQLQuery(
         value=SQLTranspiler(

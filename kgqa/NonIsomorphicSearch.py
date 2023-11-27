@@ -9,7 +9,7 @@ def pids_to_sql_list(pids):
 
 def infer_n_hops_from_lists(subj_pids, obj_pids, n: int = 1, inverse: bool = False):
     db = Database()
-    basetable = "claims_5m_inv"
+    basetable = "claims_inv"
     subj_list = pids_to_sql_list(subj_pids)
     obj_list = pids_to_sql_list(obj_pids)
     SELECT = ", ".join([f"c{i + 1}.property" for i in range(n)])
