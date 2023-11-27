@@ -1,4 +1,4 @@
-from kgqa.MatchingUtils import compute_similar_entity_ids
+from kgqa.MatchingUtils import compute_similar_entities
 from kgqa.PromptBuilder import PromptBuilder
 from kgqa.Database import Database
 
@@ -24,8 +24,8 @@ def infer_n_hops_from_lists(subj_pids, obj_pids, n: int = 1, inverse: bool = Fal
 def infer_n_hops_from_examples(examples, n: int = 1):
     options = []
     for subj, obj in examples:
-        subj_pids, subj_scores = compute_similar_entity_ids(subj, num_qids=5)
-        obj_pids, obj_scores = compute_similar_entity_ids(obj, num_qids=5)
+        subj_pids, subj_scores = compute_similar_entities(subj, num_qids=5)
+        obj_pids, obj_scores = compute_similar_entities(obj, num_qids=5)
         options.append(set(infer_n_hops_from_lists(subj_pids, obj_pids, n=n)))
 
     properties = set.intersection(*options)

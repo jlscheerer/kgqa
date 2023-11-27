@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Set, Tuple, Type, cast
 from typing_extensions import override
 
 
-from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
+from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
 
 from .QueryParser import (
     Aggregation,
@@ -215,6 +215,7 @@ class QueryGraphNode:
 
 @dataclass
 class QueryGraphEdge:
+    # TODO(jlscheerer) Rename this to property.
     predicate: PredicateType
     matched_pids: List[str] = field(default_factory=list)
 
@@ -332,7 +333,7 @@ def _match_predicates(wqg: ExecutableQueryGraph) -> Dict[str, Dict[str, float]]:
                 pids, scores = [edge.predicate.value], [1.0]
             else:
                 assert isinstance(edge.predicate, Variable)
-                pids, scores = compute_similar_predicates(edge.predicate.query_name())
+                pids, scores = compute_similar_properties(edge.predicate.query_name())
             scores = [round(x, 2) for x in scores]
             pred_to_pid_to_score[edge.predicate.query_name()] = dict(zip(pids, scores))
             edge.set_matched_pids(pids)
@@ -346,7 +347,7 @@ def _match_entities(wqg: ExecutableQueryGraph) -> Dict[str, Dict[str, float]]:
         if not node.is_free:
             # Temporary assumption. TODO(jlscheerer) handle different constants.
             if isinstance(node.value, StringConstant):
-                qids, scores = compute_similar_entity_ids(node.value.value)
+                qids, scores = compute_similar_entities(node.value.value)
             elif isinstance(node.value, IDConstant):
                 qids, scores = [node.value.value], [1.0]
             else:

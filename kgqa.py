@@ -14,8 +14,7 @@ from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import QueryParser, QueryParserException
 from kgqa.PostProcessing import run_and_rank
-from kgqa.MatchingUtils import compute_similar_entity_ids, compute_similar_predicates
-from kgqa.FaissIndex import FaissIndexDirectory
+from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
 from kgqa.Database import Database
 from kgqa.SPARQLBackend import wqg2sparql
 from kgqa.SQLBackend import wqg2sql
@@ -77,7 +76,7 @@ def _handle_user_query(query: str):
 
 def _handle_user_help() -> bool:
     print(".entity\t\t\tRetrieves similar entities")
-    print(".predicate\t\tRetrieves similar predicates")
+    print(".property\t\tRetrieves similar properties")
     print(".search\t\t\tPerforms non-isomorphic search")
     print(".set\t\t\tSet user preferences")
     print(".exit\t\t\tExit this program")
@@ -88,25 +87,23 @@ def _handle_builtin_entity(args: List[str]) -> bool:
     db = Database()
     name = " ".join(args)
     with yaspin(text=f'Scanning for entities matching "{name}"...'):
-        faiss = FaissIndexDirectory().labels
-        qids, scores = compute_similar_entity_ids(name)
+        qids, scores, labels = compute_similar_entities(name, return_labels=True)  # type: ignore
         results = [
-            (qid, score, faiss.label_for_id(qid), db.get_description_for_id(qid))
-            for qid, score in zip(qids, scores)
+            (qid, score, label, db.get_description_for_id(qid))
+            for qid, score, label in zip(qids, scores, labels)
         ]
     print(tabulate(results, ["QID", "Score", "Label", "Description"]))
     return True
 
 
-def _handle_builtin_predicate(args: List[str]) -> bool:
+def _handle_builtin_property(args: List[str]) -> bool:
     db = Database()
     name = " ".join(args)
-    with yaspin(text=f'Scanning for predicates matching "{name}..."'):
-        faiss = FaissIndexDirectory().properties
-        pids, scores = compute_similar_predicates(name)
+    with yaspin(text=f'Scanning for predicates matching "{name}"...'):
+        pids, scores, labels = compute_similar_properties(name, return_labels=True)  # type: ignore
         results = [
-            (pid, score, faiss.label_for_id(pid), db.get_description_for_id(pid))
-            for pid, score in zip(pids, scores)
+            (pid, score, label, db.get_description_for_id(pid))
+            for pid, score, label in zip(pids, scores, labels)
         ]
     print(tabulate(results, ["PID", "Score", "Label", "Description"]))
     return True
@@ -148,8 +145,8 @@ def _handle_user_builtin(command: str) -> bool:
         return _handle_user_help()
     elif builtin == ".entity":
         return _handle_builtin_entity(args)
-    elif builtin == ".predicate":
-        return _handle_builtin_predicate(args)
+    elif builtin == ".property":
+        return _handle_builtin_property(args)
     elif builtin == ".search":
         return _handle_builtin_search(args)
     elif builtin == ".set":
