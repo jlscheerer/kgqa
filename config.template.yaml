@@ -25,6 +25,9 @@ embeddings:
   transformer:
     model: "all-MiniLM-L6-v2"
     device: "cpu"
+  server:
+    host: "127.0.01"
+    port: 43096
 
 # Invertible Predicates
 predicates:
