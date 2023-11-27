@@ -4,6 +4,7 @@ from collections import defaultdict
 
 import faiss
 import json
+from kgqa.FaissIndex import faiss_id_to_int, faiss_int_to_id
 import numpy as np
 import pandas as pd
 from yaspin import yaspin
@@ -12,7 +13,7 @@ from tqdm import tqdm
 
 from kgqa.Config import Config
 from kgqa.Database import Database
-from kgqa.FileUtils import partioned_files_in_directory
+from kgqa.FileUtils import partioned_files_in_directory, read_strs_from_file
 from kgqa.Transformers import Transformer
 from kgqa.Constants import *
 
@@ -90,23 +91,40 @@ def _load_label_embeddings():
     )
 
 
+def _preprocess_ids_to_np(filename):
+    ids_txt = read_strs_from_file(filename)
+    return np.array([faiss_id_to_int(id) for id in ids_txt], dtype=np.int64)
+
+
+def _emb_file_to_qids_file(filename):
+    assert filename.startswith("emb_")
+    assert filename.endswith(".npy")
+    return f'qids_{filename[len("emb_"):-len(".npy")]}.txt'
+
+
 def compute_faiss_index():
     config = Config()
 
-    with yaspin(text="Computing Faiss Index...") as sp:
-        embeddings = _load_label_embeddings()
-        dimensions = embeddings.shape[1]
-        factory_settings = "Flat"
+    EMBEDDINGS_SIZE = 384  # embeddings.shape[1]
+    factory_settings = "Flat"
+    embeddings_idx = faiss.index_factory(
+        EMBEDDINGS_SIZE, factory_settings, faiss.METRIC_INNER_PRODUCT
+    )
+    idx = faiss.IndexIDMap(embeddings_idx)
 
-        idx = faiss.index_factory(
-            dimensions, factory_settings, faiss.METRIC_INNER_PRODUCT
-        )
-        idx.add(embeddings)
-        _dump_pickle_to_file(
-            config.file_in_directory("embeddings", FILENAME_FAISS_INDEX), idx
-        )
+    embeddings_files = _get_label_embeddings_files()
 
-        sp.green.ok("✔ ")
+    for label_embeddings_file in tqdm(embeddings_files):
+        file = config.file_in_directory("embeddings", label_embeddings_file)
+        ids = _preprocess_ids_to_np(
+            config.file_in_directory(
+                "embeddings", _emb_file_to_qids_file(label_embeddings_file)
+            )
+        )
+        embeddings = np.load(file)
+        idx.add_with_ids(embeddings, ids)
+
+    faiss.write_index(idx, config.file_in_directory("embeddings", FILENAME_FAISS_INDEX))
 
 
 def extract_db_properties_en():
@@ -159,13 +177,18 @@ def compute_property_faiss_index():
         embeddings = np.load(
             config.file_in_directory("embeddings", FILENAME_PROPERTY_EMBEDDINGS)
         )
+        ids = _preprocess_ids_to_np(
+            config.file_in_directory("embeddings", FILENAME_PROPERTY_IDS)
+        )
         factory_settings = "Flat"
-        idx = faiss.index_factory(
+        embeddings_idx = faiss.index_factory(
             embeddings.shape[1], factory_settings, faiss.METRIC_INNER_PRODUCT
         )
-        idx.add(embeddings)
-        _dump_pickle_to_file(
-            config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS), idx
+        idx = faiss.IndexIDMap(embeddings_idx)
+        idx.add_with_ids(embeddings, ids)
+
+        faiss.write_index(
+            idx, config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS)
         )
 
         sp.green.ok("✔ ")

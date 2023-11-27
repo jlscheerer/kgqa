@@ -1,3 +1,4 @@
+import faiss
 import numpy as np
 
 from .Constants import (
@@ -12,18 +13,23 @@ from .Config import Config
 from .Transformers import Transformer
 
 
+def faiss_id_to_int(id):
+    assert id[0] in ["P", "Q"]
+    val = int(id[1:])
+    # NOTE use lsb to indicate P/Q
+    return 2 * val + (1 if id[0] == "P" else 0)
+
+
+def faiss_int_to_id(val):
+    p_q = "P" if (val % 2 == 1) else "Q"
+    return f"{p_q}{val // 2}"
+
+
 # TODO(jlscheerer) Create one for Properties and one for Entities
 class FaissIndex:
-    def __init__(self, index, labels, ids):
-        if index.ntotal != len(labels) or index.ntotal != len(ids):
-            raise AssertionError("Attempting to construct invalid FaissIndex")
-        self._index = index
-        self._labels = labels
-        self._ids = ids
-
-        self._id2label = dict()
-        for id, label in zip(self._ids, self._labels):
-            self._id2label[id] = label
+    def __init__(self, index):
+        config = Config()
+        self._index = faiss.read_index(config.file_in_directory("embeddings", index))
 
     def search(self, needle, count):
         scores, faiss_ids = self._index.search(
@@ -32,28 +38,10 @@ class FaissIndex:
         return {self._ids[id]: score for score, id in zip(scores[0], faiss_ids[0])}
 
     def label_for_id(self, id):
-        return self._id2label[id]
+        raise AssertionError
 
 
 class FaissIndexDirectory(metaclass=Singleton):
     def __init__(self):
-        config = Config()
-        self.labels = FaissIndex(
-            load_pickle_from_file(
-                config.file_in_directory("embeddings", FILENAME_FAISS_INDEX),
-            ),
-            read_partioned_strs("embeddings", "labels"),
-            read_partioned_strs("embeddings", "qids"),
-        )
-
-        self.properties = FaissIndex(
-            load_pickle_from_file(
-                config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS)
-            ),
-            read_strs_from_file(
-                config.file_in_directory("embeddings", FILENAME_PROPERTY_LABELS)
-            ),
-            read_strs_from_file(
-                config.file_in_directory("embeddings", FILENAME_PROPERTY_IDS)
-            ),
-        )
+        self.labels = FaissIndex(FILENAME_FAISS_INDEX)
+        self.properties = FaissIndex(FILENAME_PROPERTY_FAISS)
