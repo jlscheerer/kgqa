@@ -38,9 +38,6 @@ class FaissIndex:
 class FaissIndexDirectory(metaclass=Singleton):
     def __init__(self):
         config = Config()
-
-        # TODO(jlscheerer) Currently, these embeddings overlap heavily with the properties.
-        #                  I suspect this is not intentional. Check with @Anton.
         self.labels = FaissIndex(
             load_pickle_from_file(
                 config.file_in_directory("embeddings", FILENAME_FAISS_INDEX),
