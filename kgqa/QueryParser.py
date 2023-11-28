@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import List, Literal, Optional, Set, Tuple, Union
+from typing import Dict, List, Literal, Optional, Set, Tuple, Union
 from dataclasses import dataclass, field
 import re
 
@@ -15,6 +15,7 @@ from .QueryLexer import (
     StringLiteral,
     Token,
     TokenType,
+    TypeName,
 )
 
 PrimitiveType = Literal[
@@ -233,6 +234,14 @@ class QueryParserException(Exception):
         self.error = error
 
 
+class QueryParserExceptionWithNote(Exception):
+    def __init__(self, token: Token, error: str, note_token: Token, note: str):
+        self.token = token
+        self.error = error
+        self.note_token = note_token
+        self.note = note
+
+
 class QueryParser:
     _tokens: List[Token]
     _cursor: int
@@ -250,12 +259,71 @@ class QueryParser:
         if not self._validate_query(pq):
             raise AssertionError()
         pq = self._rewrite_query(pq)
-        if not self._type_check_query(pq):
+        if not self._type_check_query_cc(pq):
             raise AssertionError()
         return pq
 
-    def _type_check_query(self, pq: ParsedQuery) -> bool:
-        # check for contradicting type information.
+    def _type_check_query(self, pq: ParsedQuery):
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                # TODO(jlscheerer) Infer the datatype of all constants in clauses.
+                pass
+        return self._type_check_query_cc(pq)
+
+    def _type_check_query_cc(
+        self, pq: ParsedQuery, var_types: Dict[str, Variable] = None
+    ) -> bool:
+        recursed = True
+        if var_types is None:
+            recursed = False
+            var_types = dict()
+        updated = 0
+
+        for item in pq.head:
+            if isinstance(item, Aggregation):
+                updated += self._type_insert_or_throw(var_types, item.var)
+            else:
+                assert isinstance(item, Variable)
+                updated += self._type_insert_or_throw(var_types, item)
+
+        for item in pq.filters:
+            if item.lhs.type_ is None:
+                item.lhs.type_ = item.rhs.type_  # type: ignore
+                updated += item.rhs.type_ is not None  # type: ignore
+            self._type_insert_or_throw(var_types, item.lhs)
+            if item.rhs.type_ is None:  # type: ignore
+                item.rhs.type_ = item.lhs.type_  # type: ignore
+                updated += item.lhs.type_ is not None
+            if isinstance(item.rhs, Variable):
+                updated += self._type_insert_or_throw(var_types, item.rhs)
+
+        for clause in pq.clauses:
+            assert len(clause.arguments) == 2
+            for argument in clause.arguments:
+                if isinstance(argument, Variable):
+                    updated += self._type_insert_or_throw(var_types, argument)
+        if updated:
+            return self._type_check_query_cc(pq, var_types)
+        return recursed
+
+    def _type_insert_or_throw(
+        self, var_types: Dict[str, Variable], var: Variable
+    ) -> bool:
+        if var.type_ is None:
+            if var.name in var_types:
+                var.type_ = var_types[var.name].type_
+                return True
+            return False
+        if var.name in var_types:
+            if var.type_ != var_types[var.name].type_:
+                raise QueryParserExceptionWithNote(
+                    var.token,
+                    f"inconsistent type declaration {var.type_} for variable {var.name}",
+                    var_types[var.name].token,
+                    f"{var.name} declared to be {var_types[var.name].type_} here",
+                )
+            return False
+        var_types[var.name] = var
         return True
 
     def _rewrite_query(self, pq: ParsedQuery) -> ParsedQuery:
