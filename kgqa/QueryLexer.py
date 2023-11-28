@@ -186,7 +186,7 @@ class QueryLexer:
         elif char == ":" and self._peak_char() == "=":
             self._advance_cursor(amount=2)
             return Assignment(source_location=SourceLocation(loc.begin, loc.end + 1))
-        elif char == "~":
+        elif char == "/":
             self._advance_cursor()
             return TypeIndicator(source_location=loc)
         elif char == ":":

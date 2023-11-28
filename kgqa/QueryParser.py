@@ -21,13 +21,44 @@ from .QueryLexer import (
 PrimitiveType = Literal[
     "entity_id", "string", "date", "numeric", "coordinate", "qualifier"
 ]
+PrimitiveTypes: List[PrimitiveType] = [
+    "entity_id",
+    "string",
+    "date",
+    "numeric",
+    "coordinate",
+    "qualifier",
+]
+
+
+class TypeInfo:
+    _options: Set[PrimitiveType]
+
+    def __init__(self):
+        self._options = set(PrimitiveTypes)
+
+    def __call__(self) -> Optional[PrimitiveType]:
+        if len(self._options) == 1:
+            return next(iter(self._options))
+        return None
+
+    def set(self, type_) -> bool:
+        if type_ is None:
+            return False
+        # TODO(jlscheerer) Take the token in __init__ and throw a QueryParserException
+        if type_ not in self._options:
+            raise AssertionError
+        if len(self._options) == 1:
+            return False
+        self._options = set([type_])
+        return True
 
 
 @dataclass
 class Variable:
     token: Identifier
     name: str
-    type_: Optional[PrimitiveType] = None
+    type_info = TypeInfo()
 
     def source_name(self) -> str:
         return self.name
@@ -36,9 +67,9 @@ class Variable:
         return self.name.replace("_", " ")
 
     def __repr__(self) -> str:
-        if self.type_ is None:
+        if self.type_info() is None:
             return f"Variable({self.name})"
-        return f"Variable({self.name} ~ ${self.type_})"
+        return f"Variable({self.name} / ${self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, Variable):
@@ -52,18 +83,24 @@ class Variable:
 @dataclass
 class Constant:
     token: Union[LiteralToken, Identifier]
+    type_info: TypeInfo
 
 
 @dataclass
 class StringConstant(Constant):
     token: StringLiteral
     value: str
-    type_: Optional[PrimitiveType] = None
+    type_info = TypeInfo()
+
+    def __init__(self, token, value):
+        super().__init__(token, self.type_info)
+        self.token = token
+        self.value = value
 
     def __repr__(self) -> str:
-        if self.type_ is None:
+        if self.type_info() is None:
             return f"Constant('{self.value}')"
-        return f"Constant('{self.value}' ~ ${self.type_})"
+        return f"Constant('{self.value}' / ${self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, StringConstant):
@@ -78,12 +115,17 @@ class StringConstant(Constant):
 class NumericConstant(Constant):
     token: NumericLiteral
     value: Union[int, float]
-    type_: Optional[PrimitiveType] = None
+    type_info = TypeInfo()
+
+    def __init__(self, token, value):
+        super().__init__(token, self.type_info)
+        self.token = token
+        self.value = value
 
     def __repr__(self) -> str:
-        if self.type_ is None:
+        if self.type_info() is None:
             return f"Constant({self.value})"
-        return f"Constant({self.value} ~ ${self.type_})"
+        return f"Constant({self.value} / ${self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NumericConstant):
@@ -104,6 +146,13 @@ class IDConstant(Constant):
     token: Identifier
     annotation: AnnotationType
     value: str
+    type_info = TypeInfo()
+
+    def __init__(self, token, annotation, value):
+        super().__init__(token, self.type_info)
+        self.token = token
+        self.annotation = annotation
+        self.value = value
 
     def source_name(self) -> str:
         return f"{self.annotation.value}{self.value}"
@@ -259,7 +308,7 @@ class QueryParser:
         if not self._validate_query(pq):
             raise AssertionError()
         pq = self._rewrite_query(pq)
-        if not self._type_check_query_cc(pq):
+        if not self._type_check_query(pq):
             raise AssertionError()
         return pq
 
@@ -268,7 +317,9 @@ class QueryParser:
             for argument in clause.arguments:
                 # TODO(jlscheerer) Infer the datatype of all constants in clauses.
                 pass
-        return self._type_check_query_cc(pq)
+        self._type_check_query_cc(pq)
+
+        return True
 
     def _type_check_query_cc(
         self, pq: ParsedQuery, var_types: Dict[str, Variable] = None
@@ -287,13 +338,11 @@ class QueryParser:
                 updated += self._type_insert_or_throw(var_types, item)
 
         for item in pq.filters:
-            if item.lhs.type_ is None:
-                item.lhs.type_ = item.rhs.type_  # type: ignore
-                updated += item.rhs.type_ is not None  # type: ignore
+            if item.lhs.type_info() is None:
+                updated += item.lhs.type_info.set(item.rhs.type_info())
             self._type_insert_or_throw(var_types, item.lhs)
-            if item.rhs.type_ is None:  # type: ignore
-                item.rhs.type_ = item.lhs.type_  # type: ignore
-                updated += item.lhs.type_ is not None
+            if item.rhs.type_info() is None:
+                updated += item.rhs.type_info.set(item.lhs.type_info())
             if isinstance(item.rhs, Variable):
                 updated += self._type_insert_or_throw(var_types, item.rhs)
 
@@ -309,18 +358,17 @@ class QueryParser:
     def _type_insert_or_throw(
         self, var_types: Dict[str, Variable], var: Variable
     ) -> bool:
-        if var.type_ is None:
+        if var.type_info() is None:
             if var.name in var_types:
-                var.type_ = var_types[var.name].type_
-                return True
+                return var.type_info.set(var_types[var.name].type_info())
             return False
         if var.name in var_types:
-            if var.type_ != var_types[var.name].type_:
+            if var.type_info() != var_types[var.name].type_info():
                 raise QueryParserExceptionWithNote(
                     var.token,
-                    f"inconsistent type declaration {var.type_} for variable {var.name}",
+                    f"inconsistent type declaration {var.type_info()} for variable {var.name}",
                     var_types[var.name].token,
-                    f"{var.name} declared to be {var_types[var.name].type_} here",
+                    f"{var.name} declared to be {var_types[var.name].type_info()} here",
                 )
             return False
         var_types[var.name] = var
@@ -471,7 +519,7 @@ class QueryParser:
                     raise QueryParserException(
                         type_, f"unexpected {type_.token_type} as type"
                     )
-                item.type_ = type_.type_
+                item.type_info.set(type_.type_)
         elif token.token_type == TokenType.AGGREGATION_FUNCTION:
             arguments = self._parse_arguments()
             if len(arguments) == 0:
@@ -594,7 +642,7 @@ class QueryParser:
             if qualifier_ident is not None:
                 qualifier = Variable(token=qualifier_ident, name=qualifier_ident.name)
                 if qualifier_type is not None:
-                    qualifier.type_ = qualifier_type
+                    qualifier.type_info.set(qualifier_type)
             return QueryClause(
                 predicate=predicate, arguments=arguments, qualifier=qualifier
             )
@@ -617,12 +665,15 @@ class QueryParser:
                     op, f"expected {TokenType.COMPARATOR} got {op.token_type}"
                 )
             rhs = self._pop_require_token()
+            lhs_var = Variable(token=ident, name=ident.name)
+            lhs_var.type_info.set(qualifier_type)
+
             if rhs.token_type in [
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
             ]:
                 return QueryFilter(
-                    lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
+                    lhs=lhs_var,
                     op=FilterOp(op.operator),
                     rhs=self._as_constant(rhs),
                 )
@@ -636,9 +687,9 @@ class QueryParser:
                         raise QueryParserException(
                             type_, f"expected type, but got {type_.token_type}"
                         )
-                    rhs_var.type_ = type_.type_
+                    rhs_var.type_info.set(type_.type_)
                 return QueryFilter(
-                    lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
+                    lhs=lhs_var,
                     op=FilterOp(op.operator),
                     rhs=rhs_var,
                 )
@@ -662,16 +713,19 @@ class QueryParser:
                     type_, f"expected type, but got {type_.token_type}"
                 )
             literal_type = type_.type_
+        const: Constant
         if token.token_type == TokenType.STRING_LITERAL:
-            return StringConstant(token=token, value=token.value, type_=literal_type)
+            const = StringConstant(token=token, value=token.value)
+            const.type_info.set(literal_type)
+            return const
         elif token.token_type == TokenType.NUMERIC_LITERAL:
             if "." in token.value:
-                return NumericConstant(
-                    token=token, value=float(token.value), type_=literal_type
-                )
-            return NumericConstant(
-                token=token, value=int(token.value), type_=literal_type
-            )
+                const = NumericConstant(token=token, value=float(token.value))
+                const.type_info.set(literal_type)
+                return const
+            const = NumericConstant(token=token, value=int(token.value))
+            const.type_info.set(literal_type)
+            return const
         # this represents an illegal invocation of _as_constant()
         raise AssertionError()
 
@@ -723,7 +777,7 @@ class QueryParser:
                         raise QueryParserException(
                             type_, f"unexpected {type_.token_type} as type"
                         )
-                    var.type_ = type_.type_
+                    var.type_info.set(type_.type_)
                 arguments.append(var)
             elif token.token_type in [
                 TokenType.STRING_LITERAL,
