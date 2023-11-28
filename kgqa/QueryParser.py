@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Literal, Optional, Set, Tuple, Union
 from dataclasses import dataclass, field
 import re
 
@@ -17,11 +17,16 @@ from .QueryLexer import (
     TokenType,
 )
 
+PrimitiveType = Literal[
+    "entity_id", "string", "date", "numeric", "coordinate", "qualifier"
+]
+
 
 @dataclass
 class Variable:
     token: Identifier
     name: str
+    type_: Optional[PrimitiveType] = None
 
     def source_name(self) -> str:
         return self.name
@@ -30,7 +35,9 @@ class Variable:
         return self.name.replace("_", " ")
 
     def __repr__(self) -> str:
-        return f"Variable({self.name})"
+        if self.type_ is None:
+            return f"Variable({self.name})"
+        return f"Variable({self.name} ~ ${self.type_})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, Variable):
@@ -50,9 +57,12 @@ class Constant:
 class StringConstant(Constant):
     token: StringLiteral
     value: str
+    type_: Optional[PrimitiveType] = None
 
     def __repr__(self) -> str:
-        return f"Constant('{self.value}')"
+        if self.type_ is None:
+            return f"Constant('{self.value}')"
+        return f"Constant('{self.value}' ~ ${self.type_})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, StringConstant):
@@ -67,9 +77,12 @@ class StringConstant(Constant):
 class NumericConstant(Constant):
     token: NumericLiteral
     value: Union[int, float]
+    type_: Optional[PrimitiveType] = None
 
     def __repr__(self) -> str:
-        return f"Constant({self.value})"
+        if self.type_ is None:
+            return f"Constant({self.value})"
+        return f"Constant({self.value} ~ ${self.type_})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NumericConstant):
@@ -166,15 +179,17 @@ ArgumentType = Union[Variable, Constant]
 class QueryClause(QueryAtom):
     predicate: PredicateType
     arguments: List[ArgumentType]
+    qualifier: Optional[Variable] = None
 
     def __repr__(self) -> str:
+        prefix = str()
+        if self.qualifier is not None:
+            prefix = f"{self.qualifier} := "
         if isinstance(self.predicate, Variable):
-            return f"{self.predicate.name}({', '.join([str(arg) for arg in self.arguments])})"
+            return f"{prefix}{self.predicate.name}({', '.join([str(arg) for arg in self.arguments])})"
         else:
             assert isinstance(self.predicate, IDConstant)
-            return (
-                f"{self.predicate}({', '.join([str(arg) for arg in self.arguments])}))"
-            )
+            return f"{prefix}{self.predicate}({', '.join([str(arg) for arg in self.arguments])}))"
 
 
 class FilterOp(Enum):
@@ -234,7 +249,14 @@ class QueryParser:
         pq = ParsedQuery(head=head, clauses=clauses, filters=filters)
         if not self._validate_query(pq):
             raise AssertionError()
-        return self._rewrite_query(pq)
+        pq = self._rewrite_query(pq)
+        if not self._type_check_query(pq):
+            raise AssertionError()
+        return pq
+
+    def _type_check_query(self, pq: ParsedQuery) -> bool:
+        # check for contradicting type information.
+        return True
 
     def _rewrite_query(self, pq: ParsedQuery) -> ParsedQuery:
         # Rewrite unary queries using "instance_of": person(X) becomes !P31(X, "person")
@@ -367,6 +389,15 @@ class QueryParser:
         item: HeadItem
         if token.token_type == TokenType.IDENTIFIER:
             item = Variable(token=token, name=token.name)
+            pk = self._curr_token()
+            if pk is not None and pk.token_type == TokenType.TYPE_INDICATOR:
+                self._pop_token()
+                type_ = self._pop_require_token()
+                if type_.token_type != TokenType.TYPE_NAME:
+                    raise QueryParserException(
+                        type_, f"unexpected {type_.token_type} as type"
+                    )
+                item.type_ = type_.type_
         elif token.token_type == TokenType.AGGREGATION_FUNCTION:
             arguments = self._parse_arguments()
             if len(arguments) == 0:
@@ -443,7 +474,40 @@ class QueryParser:
             raise QueryParserException(
                 ident, f"unexpected {ident.token_type} in query body"
             )
+        qualifier_ident = None
+        qualifier_type = None
         token = self._require_token()
+
+        if token.token_type == TokenType.TYPE_INDICATOR:
+            self._pop_token()
+            type_ = self._pop_require_token()
+            if type_.token_type != TokenType.TYPE_NAME:
+                raise QueryParserException(
+                    type_, f"expected type, but got {type_.token_type}"
+                )
+            qualifier_type = type_.type_
+            token = self._require_token()
+            if token.token_type not in [TokenType.ASSIGNMENT, TokenType.COMPARATOR]:
+                raise QueryParserException(
+                    token,
+                    f"expected assignment or comparison, but got {type_.token_type}",
+                )
+
+        if token.token_type == TokenType.ASSIGNMENT:
+            self._pop_token()  # NOTE remove the assignment tken.
+            if annotation is not None:
+                raise QueryParserException(
+                    annotation, f"unexpected {annotation.token_type} in assignment"
+                )
+            # TODO(jlscheerer) Support type indicator for the qualifier.
+            qualifier_ident = ident
+            ident = self._pop_require_token()
+            if ident.token_type != TokenType.IDENTIFIER:
+                raise QueryParserException(
+                    ident,
+                    f"unexpected {ident.token_type} as right-hand side of assignment",
+                )
+            token = self._require_token()
         if token.token_type == TokenType.OPEN_PAREN:
             arguments = self._parse_arguments()
             predicate: Union[Variable, IDConstant]
@@ -451,12 +515,25 @@ class QueryParser:
                 predicate = Variable(token=ident, name=ident.name)
             else:
                 predicate = self._as_id_constant(annotation=annotation, constant=ident)
-            return QueryClause(predicate=predicate, arguments=arguments)
+            qualifier = None
+            if qualifier_ident is not None:
+                qualifier = Variable(token=qualifier_ident, name=qualifier_ident.name)
+                if qualifier_type is not None:
+                    qualifier.type_ = qualifier_type
+            return QueryClause(
+                predicate=predicate, arguments=arguments, qualifier=qualifier
+            )
         elif token.token_type == TokenType.COMPARATOR:
             # We cannot have annotated predicates with comparisons.
             if annotation is not None:
                 raise QueryParserException(
                     annotation, f"unexpected {annotation.token_type} in comparison"
+                )
+            # We cannot have assignments with comparisons.
+            if qualifier_ident is not None:
+                raise QueryParserException(
+                    qualifier_ident,
+                    f"unexpected {qualifier_ident.token_type} in comparison",
                 )
 
             op = self._pop_require_token()
@@ -474,7 +551,7 @@ class QueryParser:
                     f"expected {TokenType.STRING_LITERAL} | {TokenType.NUMERIC_LITERAL} got {rhs.token_type}",
                 )
             return QueryFilter(
-                lhs=Variable(token=ident, name=ident.name),
+                lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
                 op=FilterOp(op.operator),
                 rhs=self._as_constant(rhs),
             )
@@ -483,12 +560,26 @@ class QueryParser:
         )
 
     def _as_constant(self, token: Token) -> Constant:
+        literal_type = None
+        pk = self._curr_token()
+        if pk is not None and pk.token_type == TokenType.TYPE_INDICATOR:
+            self._pop_token()
+            type_ = self._pop_require_token()
+            if type_.token_type != TokenType.TYPE_NAME:
+                raise QueryParserException(
+                    type_, f"expected type, but got {type_.token_type}"
+                )
+            literal_type = type_.type_
         if token.token_type == TokenType.STRING_LITERAL:
-            return StringConstant(token=token, value=token.value)
+            return StringConstant(token=token, value=token.value, type_=literal_type)
         elif token.token_type == TokenType.NUMERIC_LITERAL:
             if "." in token.value:
-                return NumericConstant(token=token, value=float(token.value))
-            return NumericConstant(token=token, value=int(token.value))
+                return NumericConstant(
+                    token=token, value=float(token.value), type_=literal_type
+                )
+            return NumericConstant(
+                token=token, value=int(token.value), type_=literal_type
+            )
         # this represents an illegal invocation of _as_constant()
         raise AssertionError()
 
@@ -531,7 +622,17 @@ class QueryParser:
                     )
                 arguments.append(self._as_id_constant(annotation=token, constant=ident))
             elif token.token_type == TokenType.IDENTIFIER:
-                arguments.append(Variable(token=token, name=token.name))
+                var = Variable(token=token, name=token.name)
+                pk = self._curr_token()
+                if pk is not None and pk.token_type == TokenType.TYPE_INDICATOR:
+                    self._pop_token()
+                    type_ = self._pop_require_token()
+                    if type_.token_type != TokenType.TYPE_NAME:
+                        raise QueryParserException(
+                            type_, f"unexpected {type_.token_type} as type"
+                        )
+                    var.type_ = type_.type_
+                arguments.append(var)
             elif token.token_type in [
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
@@ -577,7 +678,7 @@ class QueryParser:
         if token is None:
             raise QueryLexerException(
                 SourceLocation(begin=self._eof, end=self._eof + 1),
-                "missing require token",
+                "missing required token",
             )
         return token
 
@@ -589,7 +690,7 @@ class QueryParser:
         if token is None:
             raise QueryLexerException(
                 SourceLocation(begin=self._eof, end=self._eof + 1),
-                "missing require token",
+                "missing required token",
             )
         return token
 

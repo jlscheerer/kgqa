@@ -3,7 +3,7 @@ from typing import Optional, Literal, Union
 from dataclasses import dataclass
 import string
 
-TYPE_NAMES = {"entity_id", "string", "date", "numeric", "coordinate"}
+TYPE_NAMES = {"entity_id", "string", "date", "numeric", "coordinate", "qualifier"}
 AGGREGATION_FUNCTIONS = {"COUNT", "SUM", "AVG", "MAX", "MIN"}
 
 
@@ -55,7 +55,7 @@ class Identifier(TokenBase):
 
 @dataclass
 class TypeName(TokenBase):
-    type_: Literal["entity_id", "string", "date", "numeric", "coordinate"]
+    type_: Literal["entity_id", "string", "date", "numeric", "coordinate", "qualifier"]
 
     token_type: Literal[TokenType.TYPE_NAME] = TokenType.TYPE_NAME
 
@@ -186,9 +186,9 @@ class QueryLexer:
         elif char == ":" and self._peak_char() == "=":
             self._advance_cursor(amount=2)
             return Assignment(source_location=SourceLocation(loc.begin, loc.end + 1))
-        elif char == ":" and self._peak_char() == ":":
-            self._advance_cursor(amount=2)
-            return TypeIndicator(source_location=SourceLocation(loc.begin, loc.end + 1))
+        elif char == "~":
+            self._advance_cursor()
+            return TypeIndicator(source_location=loc)
         elif char == ":":
             self._advance_cursor()
             return Colon(source_location=loc)
