@@ -205,7 +205,7 @@ class FilterOp(Enum):
 class QueryFilter(QueryAtom):
     lhs: Variable
     op: FilterOp
-    rhs: Constant
+    rhs: Union[Variable, Constant]
 
     def __repr__(self) -> str:
         return f"{self.lhs} {self.op.value} {self.rhs}"
@@ -318,6 +318,12 @@ class QueryParser:
                     filter.lhs.token,
                     f"unbound variable: {filter.lhs.source_name()} does not appear in a clause",
                 )
+            if isinstance(filter.rhs, Variable):
+                if filter.rhs not in clause_vars:
+                    raise QueryParserException(
+                        filter.rhs.token,
+                        f"unbound variable: {filter.rhs.source_name()} does not appear in a clause",
+                    )
 
         # Aggregations are not yet supported.
         for item in pq.head:
@@ -470,6 +476,7 @@ class QueryParser:
             annotation = ident
             ident = self._pop_require_token()
 
+        # TODO(jlscheerer) We could also support Literals on the lhs of comparisons
         if ident.token_type != TokenType.IDENTIFIER:
             raise QueryParserException(
                 ident, f"unexpected {ident.token_type} in query body"
@@ -542,19 +549,36 @@ class QueryParser:
                     op, f"expected {TokenType.COMPARATOR} got {op.token_type}"
                 )
             rhs = self._pop_require_token()
-            if rhs.token_type not in [
+            if rhs.token_type in [
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
             ]:
+                return QueryFilter(
+                    lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
+                    op=FilterOp(op.operator),
+                    rhs=self._as_constant(rhs),
+                )
+            elif rhs.token_type == TokenType.IDENTIFIER:
+                rhs_var = Variable(token=rhs, name=rhs.name)
+                pk = self._curr_token()
+                if pk is not None and pk.token_type == TokenType.TYPE_INDICATOR:
+                    self._pop_token()
+                    type_ = self._pop_require_token()
+                    if type_.token_type != TokenType.TYPE_NAME:
+                        raise QueryParserException(
+                            type_, f"expected type, but got {type_.token_type}"
+                        )
+                    rhs_var.type_ = type_.type_
+                return QueryFilter(
+                    lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
+                    op=FilterOp(op.operator),
+                    rhs=rhs_var,
+                )
+            else:
                 raise QueryParserException(
                     rhs,
-                    f"expected {TokenType.STRING_LITERAL} | {TokenType.NUMERIC_LITERAL} got {rhs.token_type}",
+                    f"expected {TokenType.STRING_LITERAL} or {TokenType.NUMERIC_LITERAL}, but got {rhs.token_type}",
                 )
-            return QueryFilter(
-                lhs=Variable(token=ident, name=ident.name, type_=qualifier_type),
-                op=FilterOp(op.operator),
-                rhs=self._as_constant(rhs),
-            )
         raise QueryParserException(
             token, f"unexpected {token.token_type} in query body"
         )
