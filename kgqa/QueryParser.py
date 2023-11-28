@@ -1,6 +1,7 @@
 from enum import Enum, auto
 from typing import Dict, List, Literal, Optional, Set, Tuple, Union
 from dataclasses import dataclass, field
+from datetime import datetime
 import re
 
 from .QueryLexer import (
@@ -15,7 +16,6 @@ from .QueryLexer import (
     StringLiteral,
     Token,
     TokenType,
-    TypeName,
 )
 
 PrimitiveType = Literal[
@@ -32,33 +32,66 @@ PrimitiveTypes: List[PrimitiveType] = [
 
 
 class TypeInfo:
+    _token: Token
     _options: Set[PrimitiveType]
 
-    def __init__(self):
-        self._options = set(PrimitiveTypes)
+    def __init__(self, token, *args):
+        self._token = token
+        if len(list(args)) == 0:
+            self._options = set(PrimitiveTypes)
+        else:
+            self._options = set(list(args))
 
     def __call__(self) -> Optional[PrimitiveType]:
         if len(self._options) == 1:
             return next(iter(self._options))
         return None
 
+    def can(self, type_) -> bool:
+        return type_ in self._options
+
     def set(self, type_) -> bool:
         if type_ is None:
             return False
-        # TODO(jlscheerer) Take the token in __init__ and throw a QueryParserException
         if type_ not in self._options:
-            raise AssertionError
+            raise QueryParserException(
+                self._token,
+                f"attempting to infer type {type_}, but expected ({' | '.join(self._options)})",
+            )
         if len(self._options) == 1:
             return False
         self._options = set([type_])
         return True
+
+    def erase(self, type_) -> bool:
+        if type_ not in self._options:
+            return False
+        if len(self._options) == 0:
+            raise QueryParserException(
+                self._token, f"attempting to remove only valid type {self()}"
+            )
+        self._options.remove(type_)
+        return True
+
+    def try_set(self, type_) -> bool:
+        if len(self._options) == 1:
+            return False
+        return self.set(type_)
+
+    def __getattr__(self, type_) -> bool:
+        return type_ in self._options
 
 
 @dataclass
 class Variable:
     token: Identifier
     name: str
-    type_info = TypeInfo()
+    type_info: TypeInfo
+
+    def __init__(self, token, name):
+        self.token = token
+        self.name = name
+        self.type_info = TypeInfo(token)
 
     def source_name(self) -> str:
         return self.name
@@ -69,7 +102,7 @@ class Variable:
     def __repr__(self) -> str:
         if self.type_info() is None:
             return f"Variable({self.name})"
-        return f"Variable({self.name} / ${self.type_info()})"
+        return f"Variable({self.name} / {self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, Variable):
@@ -90,9 +123,13 @@ class Constant:
 class StringConstant(Constant):
     token: StringLiteral
     value: str
-    type_info = TypeInfo()
+    type_info: TypeInfo
 
     def __init__(self, token, value):
+        if token.quote_type == QuoteType.SINGLE_QUOTE:
+            self.type_info = TypeInfo(token, "string", "date")
+        else:
+            self.type_info = TypeInfo(token, "entity_id")
         super().__init__(token, self.type_info)
         self.token = token
         self.value = value
@@ -100,7 +137,7 @@ class StringConstant(Constant):
     def __repr__(self) -> str:
         if self.type_info() is None:
             return f"Constant('{self.value}')"
-        return f"Constant('{self.value}' / ${self.type_info()})"
+        return f"Constant('{self.value}' / {self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, StringConstant):
@@ -110,14 +147,34 @@ class StringConstant(Constant):
     def __hash__(self):
         return hash(self.value)
 
+    def try_parse_date(self, explicit_cast=False):
+        try:
+            return datetime.strptime(self.value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        try:
+            return datetime.strptime(self.value, "%Y-%m-%d")
+        except ValueError:
+            pass
+        if not explicit_cast:
+            return None
+        try:
+            return datetime.strptime(self.value, "%Y-%m")
+        except ValueError:
+            pass
+        try:
+            return datetime.strptime(self.value, "%Y")
+        except ValueError:
+            pass
+
 
 @dataclass
 class NumericConstant(Constant):
     token: NumericLiteral
     value: Union[int, float]
-    type_info = TypeInfo()
 
     def __init__(self, token, value):
+        self.type_info = TypeInfo(token, "numeric", "date")
         super().__init__(token, self.type_info)
         self.token = token
         self.value = value
@@ -125,7 +182,7 @@ class NumericConstant(Constant):
     def __repr__(self) -> str:
         if self.type_info() is None:
             return f"Constant({self.value})"
-        return f"Constant({self.value} / ${self.type_info()})"
+        return f"Constant({self.value} / {self.type_info()})"
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NumericConstant):
@@ -146,9 +203,9 @@ class IDConstant(Constant):
     token: Identifier
     annotation: AnnotationType
     value: str
-    type_info = TypeInfo()
 
     def __init__(self, token, annotation, value):
+        self.type_info = TypeInfo(token, "entity_id")
         super().__init__(token, self.type_info)
         self.token = token
         self.annotation = annotation
@@ -241,6 +298,9 @@ class QueryClause(QueryAtom):
             assert isinstance(self.predicate, IDConstant)
             return f"{prefix}{self.predicate}({', '.join([str(arg) for arg in self.arguments])}))"
 
+    def is_qualifier_claim(self):
+        return any([argument.type_info() == "qualifier" for argument in self.arguments])
+
 
 class FilterOp(Enum):
     EQ = "="
@@ -276,6 +336,9 @@ class ParsedQuery:
             spo.append((clause.arguments[0], clause.predicate, clause.arguments[1]))
         return spo
 
+    def canonical(self) -> str:
+        return f"{QuerySerializer(self)}"
+
 
 class QueryParserException(Exception):
     def __init__(self, token: Token, error: str):
@@ -291,12 +354,66 @@ class QueryParserExceptionWithNote(Exception):
         self.note = note
 
 
+class QuerySerializer:
+    def __init__(self, pq: ParsedQuery):
+        self.pq = pq
+
+    def __str__(self):
+        head = ", ".join([self._serialize_head_item(item) for item in self.pq.head])
+        body = "; ".join(
+            [self._serialize_clause(clause) for clause in self.pq.clauses]
+            + [self._serialize_filter(filter) for filter in self.pq.filters]
+        )
+        return f"{head}: {body}"
+
+    def _serialize_head_item(self, item):
+        if isinstance(item, Variable):
+            return self._serialize_var(item)
+        assert isinstance(item, Aggregation)
+        return f"{item.type_.name}({self._serialize_var(item.var)})"
+
+    def _serialize_clause(self, clause: QueryClause):
+        qprefix = str()
+        if clause.qualifier is not None:
+            qprefix = f"{clause.qualifier.name} / {clause.qualifier.type_info()} := "
+        arguments = [
+            self._serialize_var(argument)
+            if isinstance(argument, Variable)
+            else self._serialize_const(argument)
+            for argument in clause.arguments
+        ]
+        return f"{qprefix}{clause.predicate.source_name()}({', '.join(arguments)})"
+
+    def _serialize_filter(self, filter: QueryFilter):
+        lhs = self._serialize_var(filter.lhs)
+        rhs = (
+            self._serialize_var(filter.rhs)
+            if isinstance(filter.rhs, Variable)
+            else self._serialize_const(filter.rhs)
+        )
+        return f"{lhs} {filter.op.value} {rhs}"
+
+    def _serialize_var(self, var):
+        return f"{var.name} / {var.type_info()}"
+
+    def _serialize_const(self, const):
+        value = str()
+        if isinstance(const, StringConstant):
+            value = f"{const.token.quote_type.value}{const.value}{const.token.quote_type.value}"
+        elif isinstance(const, NumericConstant):
+            value = f"{const.value}"
+        else:
+            raise AssertionError
+        return f"{value} / {const.type_info()}"
+
+
 class QueryParser:
     _tokens: List[Token]
     _cursor: int
     _eof: int
 
-    def parse(self, query: str) -> ParsedQuery:
+    def parse(self, query: str, note_fn=None) -> ParsedQuery:
+        self.note_fn = note_fn
         self._tokens = list(QueryLexer(query))
         self._cursor = 0
         self._eof = len(query)
@@ -310,26 +427,147 @@ class QueryParser:
         pq = self._rewrite_query(pq)
         if not self._type_check_query(pq):
             raise AssertionError()
+
+        pq = self._canonicalize_order(pq)
         return pq
 
+    def _canonicalize_order(self, pq: ParsedQuery):
+        clauses: List[QueryClause] = []
+        for clause in pq.clauses:
+            arguments = clause.arguments
+            assert len(arguments) == 2
+            if clause.is_qualifier_claim():
+                if arguments[0].type_info() != "qualifier":
+                    arguments = [arguments[0], arguments[1]]
+            else:
+                if arguments[0].type_info() != "entity_id":
+                    arguments = [arguments[1], arguments[0]]
+            clause.arguments = arguments
+            clauses.append(clause)
+        return ParsedQuery(head=pq.head, clauses=clauses, filters=pq.filters)
+
     def _type_check_query(self, pq: ParsedQuery):
+        var_types: Dict[str, Variable] = dict()
+        qualifiers: Set[str] = set()
+        # Pick up on qualifier types automatically
+        for clause in pq.clauses:
+            if clause.qualifier is not None:
+                clause.qualifier.type_info.set("qualifier")
+                self._type_insert_or_throw(var_types, clause.qualifier)
+                if clause.qualifier.name in qualifiers:
+                    raise QueryParserException(
+                        clause.qualifier.token, "redefinition of qualifier"
+                    )
+                qualifiers.add(clause.qualifier.name)
+
+        # Any other variable in clauses cannot be a qualifier
         for clause in pq.clauses:
             for argument in clause.arguments:
-                # TODO(jlscheerer) Infer the datatype of all constants in clauses.
-                pass
-        self._type_check_query_cc(pq)
+                if isinstance(argument, Variable):
+                    if argument.name not in qualifiers:
+                        argument.type_info.erase("qualifier")
+
+        for item in pq.head:
+            if isinstance(item, Aggregation):
+                if item.type_ in [
+                    AggregationType.MAX,
+                    AggregationType.MIN,
+                    AggregationType.SUM,
+                    AggregationType.AVG,
+                ]:
+                    item.var.type_info.set("numeric")
+
+        self._type_check_query_propagate(pq, var_types)
+
+        # At least one element in a clause (w.o. qualifiers) must be an entity_id
+        for clause in pq.clauses:
+            if clause.is_qualifier_claim():
+                # NOTE We can have at most a single qualifier.
+                if (
+                    clause.arguments[0].type_info() == "qualifier"
+                    and clause.arguments[1].type_info() == "qualifier"
+                ):
+                    raise QueryParserExceptionWithNote(
+                        clause.arguments[1].token,
+                        "clause contains multiple qualifiers",
+                        clause.arguments[0].token,
+                        "first qualifier argument is located here",
+                    )
+                continue
+            else:
+                assert len(clause.arguments) == 2
+                if not clause.arguments[0].type_info.can("entity_id"):
+                    clause.arguments[1].type_info.set("entity_id")
+                elif not clause.arguments[1].type_info.can("entity_id"):
+                    clause.arguments[0].type_info.set("entity_id")
+
+        # Automatically "infer" the standard datatype for constants.
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                if isinstance(argument, StringConstant):
+                    # NOTE double quote is already set to entity_id by default.
+                    argument.type_info.try_set("string")
+                elif isinstance(argument, NumericConstant):
+                    argument.type_info.try_set("numeric")
+        self._type_check_query_propagate(pq, var_types)
+
+        # NOTE Cannot have qualifiers on qualifier clause.
+        for clause in pq.clauses:
+            if clause.is_qualifier_claim() and clause.qualifier is not None:
+                raise QueryParserExceptionWithNote(
+                    clause.qualifier.token,
+                    "cannot have qualifiers on this clause",
+                    next(
+                        argument
+                        for argument in clause.arguments
+                        if argument.type_info() == "qualifier"
+                    ).token,
+                    "variable is already a qualifier",
+                )
+
+        # NOTE the default type for variable is entity_id
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                if isinstance(argument, Variable):
+                    argument.type_info.try_set("entity_id")
+
+        self._type_check_query_propagate(pq, var_types)
+
+        # Add this point everything should be typed.
+        for item in pq.head:
+            if isinstance(item, Aggregation):
+                assert item.var.type_info() is not None
+            else:
+                assert isinstance(item, Variable)
+                assert item.type_info() is not None
+
+        for clause in pq.clauses:
+            if clause.qualifier is not None:
+                assert clause.qualifier.type_info() is not None
+            for argument in clause.arguments:
+                assert argument.type_info() is not None
+
+        for filter in pq.filters:
+            assert filter.lhs.type_info() is not None
+            assert filter.rhs.type_info() is not None
+
+        if self.note_fn is not None:
+            for clause in pq.clauses:
+                for argument in clause.arguments:
+                    if isinstance(argument, StringConstant):
+                        if argument.type_info() != "date":
+                            if argument.try_parse_date(explicit_cast=False) is not None:
+                                self.note_fn(
+                                    argument.token,
+                                    f"string literal matches date format, but is of type {argument.type_info()}; explicitly cast via '... / date'",
+                                )
 
         return True
 
-    def _type_check_query_cc(
-        self, pq: ParsedQuery, var_types: Dict[str, Variable] = None
+    def _type_check_query_propagate(
+        self, pq: ParsedQuery, var_types: Dict[str, Variable], recursed=False
     ) -> bool:
-        recursed = True
-        if var_types is None:
-            recursed = False
-            var_types = dict()
         updated = 0
-
         for item in pq.head:
             if isinstance(item, Aggregation):
                 updated += self._type_insert_or_throw(var_types, item.var)
@@ -352,7 +590,7 @@ class QueryParser:
                 if isinstance(argument, Variable):
                     updated += self._type_insert_or_throw(var_types, argument)
         if updated:
-            return self._type_check_query_cc(pq, var_types)
+            return self._type_check_query_propagate(pq, var_types, True)
         return recursed
 
     def _type_insert_or_throw(
@@ -412,12 +650,26 @@ class QueryParser:
 
     def _validate_query(self, pq: ParsedQuery) -> bool:
         head_vars = pq.head.vars()
+        aggregate_vars = set()
+        for item in pq.head:
+            if isinstance(item, Aggregation):
+                aggregate_vars.add(item.var.name)
+
+        for item in pq.head:
+            if isinstance(item, Variable):
+                if item.name in aggregate_vars:
+                    raise QueryParserException(
+                        item.token,
+                        f"variable {item.source_name()} appears as variable and in aggregate(s)",
+                    )
 
         clause_vars: Set[Variable] = set()
         for clause in pq.clauses:
             for argument in clause.arguments:
                 if isinstance(argument, Variable):
                     clause_vars.add(argument)
+            if clause.qualifier is not None:
+                clause_vars.add(clause.qualifier)
 
         # Every variable occuring in the head must be bound in the body via a clause.
         for var in head_vars:
@@ -491,16 +743,19 @@ class QueryParser:
                             f"unsupported format for entity constant: {argument.value}",
                         )
 
-        # Check for unsupported quote types - currently only "" is supported.
+        # Check for overlap in assignments
         for clause in pq.clauses:
+            if clause.qualifier is None:
+                continue
             for argument in clause.arguments:
-                if isinstance(argument, StringConstant):
-                    if argument.token.quote_type != QuoteType.DOUBLE_QUOTE:
-                        raise QueryParserException(
-                            argument.token, "unsupported quote type for argument"
+                if isinstance(argument, Variable):
+                    if clause.qualifier.name == argument.name:
+                        raise QueryParserExceptionWithNote(
+                            clause.qualifier.token,
+                            "qualifier appears as part of its own clause",
+                            argument.token,
+                            "the qualifier appears here",
                         )
-
-        # TODO(jlscheerer) NumericLiterals are not supported yet.
 
         return True
 
