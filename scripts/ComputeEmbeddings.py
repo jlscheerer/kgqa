@@ -40,6 +40,8 @@ def extract_db_labels():
     sql = f"""
     SELECT id, value
     FROM labels_en
+    WHERE starts_with(id, 'Q')
+    ORDER BY id
     """
 
     BATCH_SIZE = config["embeddings"]["batch_size"]
@@ -77,8 +79,33 @@ def compute_label_embeddings():
         np.save(embeddings_file, embeddings)
 
 
+def _preprocess_ids_to_np(filename):
+    ids_txt = read_strs_from_file(filename)
+    return np.array([faiss_id_to_int(id) for id in ids_txt], dtype=np.int64)
+
+
+def _emb_file_to_qids_file(filename):
+    assert filename.startswith("emb_")
+    assert filename.endswith(".npy")
+    return f'qids_{filename[len("emb_"):-len(".npy")]}.txt'
+
+
 def _get_label_embeddings_files():
     return partioned_files_in_directory("embeddings", "emb", "npy")
+
+
+def _get_label_id_files():
+    return partioned_files_in_directory("embeddings", "qids", "txt")
+
+
+def _get_label_ids():
+    config = Config()
+    return np.concatenate(
+        [
+            _preprocess_ids_to_np(config.file_in_directory("embeddings", file))
+            for file in _get_label_id_files()
+        ]
+    )
 
 
 def _load_label_embeddings():
@@ -89,17 +116,6 @@ def _load_label_embeddings():
             for label_embeddings_file in _get_label_embeddings_files()
         ]
     )
-
-
-def _preprocess_ids_to_np(filename):
-    ids_txt = read_strs_from_file(filename)
-    return np.array([faiss_id_to_int(id) for id in ids_txt], dtype=np.int64)
-
-
-def _emb_file_to_qids_file(filename):
-    assert filename.startswith("emb_")
-    assert filename.endswith(".npy")
-    return f'qids_{filename[len("emb_"):-len(".npy")]}.txt'
 
 
 def compute_faiss_index():
