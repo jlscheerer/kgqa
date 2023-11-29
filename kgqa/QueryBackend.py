@@ -15,7 +15,7 @@ from kgqa.QueryGraph import (
     QueryGraphId,
     QueryStatistics,
 )
-from kgqa.QueryParser import Aggregation, AggregationType, Variable
+from kgqa.QueryParser import Aggregation, Variable
 
 
 @dataclass

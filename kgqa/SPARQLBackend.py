@@ -4,6 +4,7 @@ from typing import List, Tuple
 from typing_extensions import override
 
 from kgqa.QueryBackend import QueryBackend, QueryString
+
 from kgqa.QueryGraph import (
     AggregateColumnInfo,
     AnchorEntityColumnInfo,

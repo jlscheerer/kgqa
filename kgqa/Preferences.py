@@ -5,7 +5,7 @@ from kgqa.Singleton import Singleton
 
 DEFAULT_PREFERENCES_PATH = "./preferences.yaml"
 DEFAULT_PREFERENCES = {
-    "backend": {"value": "SQL", "allowed": ["SQL", "SPARQL"]},
+    "backend": {"value": "SPARQL", "allowed": ["SPARQL"]},
     "print_sparql": {"value": "false", "allowed": ["true", "false"]},
 }
 
