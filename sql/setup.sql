@@ -85,6 +85,12 @@ CREATE TABLE claims_inv AS (
 );
 DROP TABLE claims;
 
+CREATE TABLE entity_populatarity AS (
+  SELECT entity_id, COUNT(*)
+  FROM claims_inv
+  GROUP BY entity_id
+);
+
 -- `qualifiers` requires additional preprocessing through wd-migrate.
 \copy qualifiers FROM 'csv/qualifiers.csv' DELIMITER E'\t' NULL '';
 
