@@ -1,6 +1,5 @@
 import abc
 from collections import defaultdict
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Set, Tuple, Type, cast
 from typing_extensions import override
@@ -317,7 +316,7 @@ def _construct_aqg_from_pq(pq: ParsedQuery) -> AbstractQueryGraph:
         arg2id=arg2id,
         nodes=nodes,
         edges=dict(edges),
-        head=deepcopy(pq.head),
+        head=pq.head,
         filter_var_ids=filter_var_ids,
         filters=pq.filters,
         anchors=cast(List[ArgumentType], predicates) + anchors,
@@ -366,13 +365,13 @@ def aqg2wqg(
     aqg: AbstractQueryGraph, stats: QueryStatistics
 ) -> Tuple[ExecutableQueryGraph, QueryStatistics]:
     wqg = ExecutableQueryGraph(
-        arg2id=deepcopy(aqg.arg2id),
-        nodes=deepcopy(aqg.nodes),
-        edges=deepcopy(aqg.edges),
-        head=deepcopy(aqg.head),
-        filter_var_ids=deepcopy(aqg.filter_var_ids),
-        filters=deepcopy(aqg.filters),
-        anchors=deepcopy(aqg.anchors),
+        arg2id=aqg.arg2id,
+        nodes=aqg.nodes,
+        edges=aqg.edges,
+        head=aqg.head,
+        filter_var_ids=aqg.filter_var_ids,
+        filters=aqg.filters,
+        anchors=aqg.anchors,
     )
 
     # Transform edges of the graph.

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import re
 
+from termcolor import colored
+
 from .QueryLexer import (
     AggregationFunction,
     Identifier,
@@ -375,7 +377,7 @@ class QuerySerializer:
     def _serialize_clause(self, clause: QueryClause):
         qprefix = str()
         if clause.qualifier is not None:
-            qprefix = f"{clause.qualifier.name} / {clause.qualifier.type_info()} := "
+            qprefix = f"{colored(clause.qualifier.name, 'magenta')} {colored('/', 'light_grey')} {colored(clause.qualifier.type_info(), 'light_grey')} := "
         arguments = [
             self._serialize_var(argument)
             if isinstance(argument, Variable)
@@ -394,17 +396,20 @@ class QuerySerializer:
         return f"{lhs} {filter.op.value} {rhs}"
 
     def _serialize_var(self, var):
-        return f"{var.name} / {var.type_info()}"
+        return f"{colored(var.name, 'magenta')} {colored('/', 'light_grey')} {colored(var.type_info(), 'light_grey')}"
 
     def _serialize_const(self, const):
         value = str()
         if isinstance(const, StringConstant):
-            value = f"{const.token.quote_type.value}{const.value}{const.token.quote_type.value}"
+            value = colored(
+                f"{const.token.quote_type.value}{const.value}{const.token.quote_type.value}",
+                "yellow",
+            )
         elif isinstance(const, NumericConstant):
-            value = f"{const.value}"
+            value = colored(f"{const.value}", "green")
         else:
             raise AssertionError
-        return f"{value} / {const.type_info()}"
+        return f"{value} {colored('/', 'light_grey')} {colored(const.type_info(), 'light_grey')}"
 
 
 class QueryParser:
@@ -561,6 +566,18 @@ class QueryParser:
                                     argument.token,
                                     f"string literal matches date format, but is of type {argument.type_info()}; explicitly cast via '... / date'",
                                 )
+
+        # Check that constants typed date can be parsed to dates
+        for clause in pq.clauses:
+            for argument in clause.arguments:
+                if (
+                    isinstance(argument, StringConstant)
+                    and argument.type_info() == "date"
+                ):
+                    if argument.try_parse_date(explicit_cast=True) is None:
+                        raise QueryParserException(
+                            argument.token, "unknown format for date constant"
+                        )
 
         return True
 

@@ -2,14 +2,19 @@ from enum import Enum, auto
 import inspect
 from typing import Generic, List, Set, Tuple, TypeVar, Union, Optional
 from dataclasses import dataclass
+from kgqa.QueryBackend import QueryString
 
 from rdflib.plugins import sparql
 from rdflib import term
 
 from kgqa.SPARQLBackend import SPARQLQuery
-from kgqa.SQLBackend import SQLQuery
 
 T = TypeVar("T")
+
+
+@dataclass
+class SQLQuery(QueryString):
+    pass
 
 
 @dataclass

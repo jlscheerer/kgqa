@@ -12,27 +12,40 @@ from kgqa.Preferences import Preferences
 from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
-from kgqa.QueryParser import QueryParser, QueryParserException
+from kgqa.QueryParser import (
+    QueryParser,
+    QueryParserException,
+    QueryParserExceptionWithNote,
+)
 from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
 from kgqa.Database import Database
 from kgqa.SPARQLBackend import wqg2sparql
-from kgqa.SQLBackend import wqg2sql
 
 
 def _display_query_results(results, columns):
     pydoc.pipepager(tabulate(results, columns, tablefmt="orgtbl"), cmd="less -R")
 
 
-def _annotate_parser_error(query: str, source_location: SourceLocation, error: str):
+def _annotate_source(
+    query: str, source_location: SourceLocation, type_: str, color: str, msg: str
+):
     print(
-        f"{colored('error', 'red', attrs=['bold'])}: {colored(error, 'white', attrs=['bold'])}"
+        f"{colored(type_, color, attrs=['bold'])}: {colored(msg, 'white', attrs=['bold'])}"
     )
     print(f"  {query}")
     print(
         " " * (source_location.begin + 2)
         + colored("^" * (source_location.end - source_location.begin), "green")
     )
+
+
+def _annotate_parser_error(query: str, source_location: SourceLocation, error: str):
+    return _annotate_source(query, source_location, "error", "red", error)
+
+
+def _annotate_parser_note(query: str, source_location: SourceLocation, note: str):
+    return _annotate_source(query, source_location, "note", "yellow", note)
 
 
 def _handle_user_query(query: str):
@@ -48,10 +61,7 @@ def _handle_user_query(query: str):
 
         backend = Preferences()["backend"]
         qs: QueryString
-        if backend == "SQL":
-            with yaspin(text="Emitting SQL Code..."):
-                qs, stats = wqg2sql(wqg, stats)
-        elif backend == "SPARQL":
+        if backend == "SPARQL":
             with yaspin(text="Emitting SPARQL Code..."):
                 qs, stats = wqg2sparql(wqg, stats)
         else:
@@ -122,6 +132,29 @@ def _handle_builtin_search(args: List[str]) -> bool:
     return True
 
 
+def _handle_builtin_parse(args: List[str]) -> bool:
+    query = " ".join(args)
+    try:
+        qp = QueryParser()
+        pq = qp.parse(
+            query,
+            lambda token, msg: _annotate_parser_note(query, token.source_location, msg),
+        )
+        print(pq.canonical())
+    except QueryLexerException as err:
+        _annotate_parser_error(query, err.source_location, err.error)
+    except QueryParserException as err:
+        _annotate_parser_error(query, err.token.source_location, err.error)
+    except QueryParserExceptionWithNote as err:
+        _annotate_parser_error(query, err.token.source_location, err.error)
+        _annotate_parser_note(query, err.note_token.source_location, err.note)
+    except Exception as err:
+        print(f"Error: {err}")
+        traceback.print_exc()
+
+    return True
+
+
 def _handle_builtin_set(args: List[str]) -> bool:
     if len(args) != 2:
         print(
@@ -149,6 +182,8 @@ def _handle_user_builtin(command: str) -> bool:
         return _handle_builtin_property(args)
     elif builtin == ".search":
         return _handle_builtin_search(args)
+    elif builtin == ".parse":
+        return _handle_builtin_parse(args)
     elif builtin == ".set":
         return _handle_builtin_set(args)
     print(
@@ -165,10 +200,19 @@ def _handle_user_command(command: str) -> bool:
 
 
 def main():
+    intc = 0
     while True:
-        command = input("> ")
-        if not _handle_user_command(command.strip()):
-            break
+        try:
+            command = input("> ")
+            if not _handle_user_command(command.strip()):
+                break
+            intc = 0
+        except KeyboardInterrupt:
+            print()
+            intc += 1
+            if intc > 1:
+                print(colored("aborting session due to keyboard interrupt", "red"))
+                break
 
 
 if __name__ == "__main__":

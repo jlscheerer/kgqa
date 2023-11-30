@@ -32,7 +32,7 @@ def extract_db_labels():
     SELECT id, value
     FROM labels_en
     WHERE starts_with(id, 'Q')
-    ORDER BY id
+    ORDER BY SUBSTRING(id FROM '[0-9]+$')::int
     """
 
     BATCH_SIZE = config["embeddings"]["batch_size"]

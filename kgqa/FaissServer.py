@@ -21,11 +21,19 @@ def compute_similar_entity_ids(
 
 
 class FaissServer(RequestServer):
+    debug_mode: bool = False
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     @request_handler
     def compute_similar_properties(self, data):
+        if FaissServer.debug_mode:
+            self.write(
+                {"pids": ["P123"], "scores": [1.0], "labels": ["Debug Property P123"]}
+            )
+            return
+
         predicate = data["property"]
         num_pids = data["num_pids"]
         pid_to_score = FaissIndexDirectory().properties.search(predicate, num_pids)
@@ -35,7 +43,8 @@ class FaissServer(RequestServer):
             reverse=True,
         )
         pids, scores = zip(*pids_scores)
-        labels = [FaissIndexDirectory().labels.label_for_id(id) for id in pids]
+        # TODO(jlscheerer) Fix this again.
+        labels = [None for id in pids]
         self.write(
             {
                 "pids": pids,
@@ -46,6 +55,12 @@ class FaissServer(RequestServer):
 
     @request_handler
     def compute_similar_entities(self, data):
+        if FaissServer.debug_mode:
+            self.write(
+                {"qids": ["Q123"], "scores": [1.0], "labels": ["Debug Entity Q123"]}
+            )
+            return
+
         entity = data["entity"]
         num_qids = data["num_qids"]
         pid_to_score = FaissIndexDirectory().labels.search(entity, num_qids)
@@ -55,7 +70,8 @@ class FaissServer(RequestServer):
             reverse=True,
         )
         qids, scores = zip(*pids_scores)
-        labels = [FaissIndexDirectory().labels.label_for_id(id) for id in qids]
+        # TODO(jlscheerer) Fix this again.
+        labels = [None for id in qids]
         self.write(
             {"qids": qids, "scores": [float(x) for x in scores], "labels": labels}
         )

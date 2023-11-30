@@ -25,7 +25,6 @@ def faiss_int_to_id(val):
     return f"{p_q}{val // 2}"
 
 
-# TODO(jlscheerer) Create one for Properties and one for Entities
 class FaissIndex:
     def __init__(self, index):
         config = Config()
@@ -35,7 +34,9 @@ class FaissIndex:
         scores, faiss_ids = self._index.search(
             np.array([Transformer().encode(needle)]), count
         )
-        return {self._ids[id]: score for score, id in zip(scores[0], faiss_ids[0])}
+        return {
+            faiss_int_to_id(id): score for score, id in zip(scores[0], faiss_ids[0])
+        }
 
     def label_for_id(self, id):
         raise AssertionError
