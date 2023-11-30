@@ -9,7 +9,8 @@ from termcolor import colored
 from kgqa.NonIsomorphicSearch import infer_n_hops_predicate
 
 from kgqa.Preferences import Preferences
-from kgqa.QueryBackend import QueryString
+
+# from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import (
@@ -17,10 +18,12 @@ from kgqa.QueryParser import (
     QueryParserException,
     QueryParserExceptionWithNote,
 )
-from kgqa.PostProcessing import run_and_rank
+
+# from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
 from kgqa.Database import Database
-from kgqa.SPARQLBackend import wqg2sparql
+
+# from kgqa.SPARQLBackend import wqg2sparql
 
 
 def _display_query_results(results, columns):
@@ -54,23 +57,23 @@ def _handle_user_query(query: str):
             pq = QueryParser().parse(query)
 
         with yaspin(text="Generating Abstract Query Graph..."):
-            aqg, stats = query2aqg(pq)
+            aqg = query2aqg(pq)
 
         with yaspin(text="Synthesizing Executable Query Graph..."):
-            wqg, stats = aqg2wqg(aqg, stats)
+            wqg = aqg2wqg(aqg)
 
         backend = Preferences()["backend"]
         qs: QueryString
         if backend == "SPARQL":
             with yaspin(text="Emitting SPARQL Code..."):
-                qs, stats = wqg2sparql(wqg, stats)
+                qs = wqg2sparql(wqg)
         else:
             raise AssertionError(
                 f"trying to emit code for unknown backend: '{backend}'"
             )
 
         with yaspin(text="Executing Query on Wikidata..."):
-            results, columns = run_and_rank(qs, wqg, stats)
+            results, columns = run_and_rank(qs, wqg)
 
         _display_query_results(results, columns)
     except QueryLexerException as err:

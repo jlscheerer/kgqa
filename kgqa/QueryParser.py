@@ -286,7 +286,9 @@ ArgumentType = Union[Variable, Constant]
 
 @dataclass
 class QueryClause(QueryAtom):
+    # TODO(jlscheerer) Rename this to property.
     predicate: PredicateType
+
     arguments: List[ArgumentType]
     qualifier: Optional[Variable] = None
 
