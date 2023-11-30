@@ -1,5 +1,5 @@
 import abc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
 from .MatchingUtils import compute_similar_entities, compute_similar_properties
@@ -45,10 +45,19 @@ class QueryGraphIdGenerator:
 class QueryGraphNode:
     id_: QueryGraphId
 
+    def mark_executable(self):
+        pass
+
 
 @dataclass
 class QueryGraphPropertyNode(QueryGraphNode):
     property: str
+
+    pids: List[str] = field(default_factory=list)
+    scores: List[float] = field(default_factory=list)
+
+    def mark_executable(self):
+        self.pids, self.scores = compute_similar_properties(self.property)
 
 
 @dataclass
@@ -65,6 +74,17 @@ class QueryGraphConstantNode(QueryGraphNode):
 
 
 @dataclass
+class QueryGraphEntityConstantNode(QueryGraphConstantNode):
+    constant: StringConstant
+
+    qids: List[str] = field(default_factory=list)
+    scores: List[float] = field(default_factory=list)
+
+    def mark_executable(self):
+        self.qids, self.scores = compute_similar_entities(self.constant.value)
+
+
+@dataclass
 class QueryGraphGeneratedNode(QueryGraphNode):
     pass
 
@@ -74,20 +94,32 @@ class QueryGraphEdge(abc.ABC):
     source: QueryGraphNode
     target: QueryGraphNode
 
+    def mark_executable(self):
+        pass
+
 
 @dataclass
 class QueryGraphPropertyEdge(QueryGraphEdge):
     property: Union[QueryGraphPropertyNode, IDConstant]
+
+    pids: List[str] = field(default_factory=list)
+    scores: List[float] = field(default_factory=list)
 
 
 @dataclass
 class QueryGraphDynPropertyEdge(QueryGraphPropertyEdge):
     property: QueryGraphPropertyNode
 
+    def mark_executable(self):
+        self.pids, self.scores = self.property.pids, self.property.scores
+
 
 @dataclass
 class QueryGraphConstPropertyEdge(QueryGraphPropertyEdge):
     property: IDConstant
+
+    def mark_executable(self):
+        self.pids, self.scores = [self.property.value], [1.0]
 
 
 @dataclass
@@ -163,7 +195,7 @@ class QueryGraph:
     columns: List[ColumnInfo]
 
     nodes: List[QueryGraphNode]
-    edges: List[QueryGraphEdge]
+    edges: List[QueryGraphPropertyEdge]
 
     # NOTE Filters are simply a special kind of edge.
     #      As the backend uses them differently, we store them separately.
@@ -173,17 +205,28 @@ class QueryGraph:
     #      As the backend uses them differently, we store them separately.
     aggregates: List[QueryGraphAggregate]
 
+    executable: bool = False
+
     def is_executable(self):
-        return False
+        return self.executable
 
     def is_abstract(self):
         return not self.is_executable()
+
+    def mark_executable(self):
+        for node in self.nodes:
+            node.mark_executable()
+
+        for edge in self.edges:
+            edge.mark_executable()
+
+        self.executable = True
 
 
 def query2aqg(pq: ParsedQuery) -> QueryGraph:
     columns: List[ColumnInfo] = []
     nodes: List[QueryGraphNode] = []
-    edges: List[QueryGraphEdge] = []
+    edges: List[QueryGraphPropertyEdge] = []
     filters: List[QueryGraphFilter] = []
     aggregates: List[QueryGraphAggregate] = []
 
@@ -204,9 +247,19 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                     arg2node[argument] = nodes[-1]
             elif isinstance(argument, Constant):
                 if argument not in arg2node:
-                    nodes.append(
-                        QueryGraphConstantNode(id_=new_id(), constant=argument)
-                    )
+                    if (
+                        isinstance(argument, StringConstant)
+                        and argument.type_info() == "entity_id"
+                    ):
+                        nodes.append(
+                            QueryGraphEntityConstantNode(
+                                id_=new_id(), constant=argument
+                            )
+                        )
+                    else:
+                        nodes.append(
+                            QueryGraphConstantNode(id_=new_id(), constant=argument)
+                        )
                     arg2node[argument] = nodes[-1]
 
                 if (
@@ -340,18 +393,5 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
 
 
 def aqg2wqg(aqg: QueryGraph) -> QueryGraph:
-    """
-    # Transform edges of the graph.
-    pid2scores = _match_predicates(wqg)
-
-    # Transform entities of the graph
-    qid2scores = _match_entities(wqg)
-
-    # Add scores info the stats.
-    stats.set_scores(pid2scores, qid2scores)
-
-    return wqg, stats
-    """
-
-    raise AssertionError
+    aqg.mark_executable()
     return aqg
