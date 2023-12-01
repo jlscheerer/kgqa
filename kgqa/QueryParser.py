@@ -409,6 +409,8 @@ class QuerySerializer:
             )
         elif isinstance(const, NumericConstant):
             value = colored(f"{const.value}", "green")
+        elif isinstance(const, IDConstant):
+            value = colored(f"!{const.value}", "green")
         else:
             raise AssertionError
         return f"{value} {colored('/', 'light_grey')} {colored(const.type_info(), 'light_grey')}"

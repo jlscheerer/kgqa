@@ -33,25 +33,12 @@ class FaissServer(RequestServer):
                 {"pids": ["P123"], "scores": [1.0], "labels": ["Debug Property P123"]}
             )
             return
-
         predicate = data["property"]
         num_pids = data["num_pids"]
-        pid_to_score = FaissIndexDirectory().properties.search(predicate, num_pids)
-        pids_scores = sorted(
-            [(pid, score) for pid, score in pid_to_score.items()],
-            key=lambda x: x[1],
-            reverse=True,
+        ids, labels, scores = FaissIndexDirectory().properties.search(
+            predicate, num_pids
         )
-        pids, scores = zip(*pids_scores)
-        # TODO(jlscheerer) Fix this again.
-        labels = [None for id in pids]
-        self.write(
-            {
-                "pids": pids,
-                "scores": [float(x) for x in scores],
-                "labels": labels,
-            }
-        )
+        self.write({"pids": ids, "scores": scores, "labels": labels})
 
     @request_handler
     def compute_similar_entities(self, data):
@@ -63,18 +50,8 @@ class FaissServer(RequestServer):
 
         entity = data["entity"]
         num_qids = data["num_qids"]
-        pid_to_score = FaissIndexDirectory().labels.search(entity, num_qids)
-        pids_scores = sorted(
-            [(pid, score) for pid, score in pid_to_score.items()],
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        qids, scores = zip(*pids_scores)
-        # TODO(jlscheerer) Fix this again.
-        labels = [None for id in qids]
-        self.write(
-            {"qids": qids, "scores": [float(x) for x in scores], "labels": labels}
-        )
+        ids, labels, scores = FaissIndexDirectory().labels.search(entity, num_qids)
+        self.write({"qids": ids, "scores": scores, "labels": labels})
 
 
 if __name__ == "__main__":
