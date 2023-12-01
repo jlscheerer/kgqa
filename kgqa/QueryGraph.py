@@ -59,6 +59,9 @@ class QueryGraphPropertyNode(QueryGraphNode):
     def mark_executable(self):
         self.pids, self.scores = compute_similar_properties(self.property)
 
+    def score(self, pid):
+        return self.scores[self.pids.index(pid)]
+
 
 @dataclass
 class QueryGraphVariableNode(QueryGraphNode):
@@ -82,6 +85,9 @@ class QueryGraphEntityConstantNode(QueryGraphConstantNode):
 
     def mark_executable(self):
         self.qids, self.scores = compute_similar_entities(self.constant.value)
+
+    def score(self, qid):
+        return self.scores[self.qids.index(qid)]
 
 
 @dataclass

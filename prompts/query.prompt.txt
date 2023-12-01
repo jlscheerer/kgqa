@@ -1,0 +1,17 @@
+Given a query as natural language generate a logical representation.
+For example:
+ "what is the name of justin bieber brother?"
+becomes X: sibling(X, "Justin Bieber"); sex(X, "male")
+or
+"who is married to barack obama?"
+becomes: X: married_to(X, "Barack Obama");
+or
+"who is the president of the USA?"
+becomes: X: head_of_government(X, "United States of America")
+or
+"what college did matt lauer attend?"
+becomes: X: attended_college(X, "Matt Lauer")
+
+Now generate the logical representation for "${QUERY}"
+
+Answer only in the logical representation without any further text.

@@ -18,6 +18,7 @@ from kgqa.QueryParser import (
     QueryParserException,
     QueryParserExceptionWithNote,
 )
+from kgqa.PromptBuilder import PromptBuilder
 
 from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
@@ -70,13 +71,10 @@ def _handle_user_query(query: str):
             raise AssertionError(
                 f"trying to emit code for unknown backend: '{backend}'"
             )
+        with yaspin(text="Executing Query on Wikidata..."):
+             results, columns = run_and_rank(qs, wqg)
 
-        print(qs.value)
-        print(qs.col2name)
-        # with yaspin(text="Executing Query on Wikidata..."):
-        #     results, columns = run_and_rank(qs, wqg)
-
-        # _display_query_results(results, columns)
+        _display_query_results(results, columns)
     except QueryLexerException as err:
         _annotate_parser_error(query, err.source_location, err.error)
         return
@@ -89,6 +87,7 @@ def _handle_user_query(query: str):
 
 
 def _handle_user_help() -> bool:
+    print(".query\t\t\tSearch using Natural Language")
     print(".entity\t\t\tRetrieves similar entities")
     print(".property\t\tRetrieves similar properties")
     print(".search\t\t\tPerforms non-isomorphic search")
@@ -96,6 +95,17 @@ def _handle_user_help() -> bool:
     print(".exit\t\t\tExit this program")
     return True
 
+
+def _handle_builtin_query(args: List[str]) -> bool:
+    query = " ".join(args)
+    semantiq = (
+        PromptBuilder(template="QUERY_GENERATE")
+        .set("QUERY", query)
+        .execute()
+    )
+    print("Generated Query: ", semantiq)
+    _handle_user_query(semantiq)
+    return True
 
 def _handle_builtin_entity(args: List[str]) -> bool:
     db = Database()
@@ -180,6 +190,8 @@ def _handle_user_builtin(command: str) -> bool:
         return False
     elif builtin == ".help":
         return _handle_user_help()
+    elif builtin == ".query":
+        return _handle_builtin_query(args)
     elif builtin == ".entity":
         return _handle_builtin_entity(args)
     elif builtin == ".property":

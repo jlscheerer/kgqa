@@ -1,3 +1,5 @@
+import pandas as pd
+
 from .Database import Database
 from .Preferences import Preferences
 from .QueryBackend import QueryString
@@ -37,14 +39,14 @@ def run_and_rank(query: QueryString, wqg: QueryGraph):
         for id, col in zip(row, wqg.columns):
             # TODO(jlscheerer) Refactor this, because both are the same anyways.
             if isinstance(col, PropertyColumnInfo):
-                score = col.node.scores[id]
+                score = col.node.score(id)
             elif isinstance(col, AnchorEntityColumnInfo):
                 node = col.node
                 assert isinstance(node.constant, IDConstant) or isinstance(
                     node.constant, StringConstant
                 )
                 if isinstance(node, QueryGraphEntityConstantNode):
-                    score = node.scores[id]
+                    score = node.score(id)
                 else:
                     score = 1.0
             elif isinstance(col, HeadVariableColumnInfo):

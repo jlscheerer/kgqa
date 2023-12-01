@@ -19,6 +19,7 @@ POPULARITY_WEIGHT = 0.3
 
 POPULARITY_SCALE = 100
 
+NUM_RESULTS = 10
 
 def faiss_id_to_int(id):
     assert id[0] in ["P", "Q"]
@@ -82,7 +83,6 @@ class FaissIndex:
             }
         )
         df.sort_values(by=["score"], ascending=False, inplace=True)
-
         print(df)
 
         results = dict()
@@ -91,7 +91,7 @@ class FaissIndex:
                 break
             results[row["id"]] = row["score"]
 
-        return list(df["id"][:5]), list(df["label"][:5]), list(df["score"][:5])
+        return list(df["id"][:NUM_RESULTS]), list(df["label"][:NUM_RESULTS]), list(df["score"][:NUM_RESULTS])
 
     def _popularity_score(self, popularity):
         return sigmoid(popularity / POPULARITY_SCALE)

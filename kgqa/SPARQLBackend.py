@@ -123,8 +123,6 @@ class SPARQLBackend(QueryBackend):
                 column, PropertyColumnInfo
             ):
                 group_by.append(column)
-        for aggregate in self.graph.aggregates:
-            group_by.append(self._column_by_node_id(aggregate.source.id_))
         return " ".join(map(self._sparql_name_for_column, group_by))
 
     def _construct_pid_list(self, pids: List[str]) -> str:
@@ -140,7 +138,8 @@ class SPARQLBackend(QueryBackend):
                 self._column_by_node_id(column.aggregate.source.id_)
             )
             # TODO(jlscheerer) We should move Z_ to _sparql_name_for_column
-            return f"({column.aggregate.type_.name}({variable}) AS ?Z{column.aggregate.target.id_.value})"
+            aggregate_var = self._sparql_name_for_column(self._column_by_node_id(column.aggregate.target.id_))
+            return f"({column.aggregate.type_.name}({variable}) AS {aggregate_var})"
         return self._sparql_name_for_column(column)
 
     def _sparql_name_for_column(self, column: ColumnInfo) -> str:

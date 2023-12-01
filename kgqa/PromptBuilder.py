@@ -29,6 +29,9 @@ def parse_semicolon_separated_lines(response: str):
     return result
 
 
+def parse_identity(response: str):
+    return response
+
 class PromptTemplateDirectory(metaclass=Singleton):
     def __init__(self):
         config = Config()
@@ -37,7 +40,7 @@ class PromptTemplateDirectory(metaclass=Singleton):
         ) as file:
             prompts = json.load(file)
 
-        self._parsers = {"semicolon_separated_lines": parse_semicolon_separated_lines}
+        self._parsers = {"semicolon_separated_lines": parse_semicolon_separated_lines, "identity": parse_identity}
         self._prompts = dict()
         for name, prompt in prompts.items():
             with open(
