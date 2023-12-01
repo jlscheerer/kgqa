@@ -109,9 +109,14 @@ class QueryGraphEdge(abc.ABC):
         pass
 
 
+QueryGraphPropertyEdgeType = Union[
+    QueryGraphPropertyNode, QueryGraphPropertyConstantNode
+]
+
+
 @dataclass
 class QueryGraphPropertyEdge(QueryGraphEdge):
-    property: Union[QueryGraphPropertyNode, QueryGraphPropertyConstantNode]
+    property: QueryGraphPropertyEdgeType
 
 
 @dataclass
@@ -150,6 +155,20 @@ class ColumnInfo(abc.ABC):
 
 @dataclass
 class EntityColumnInfo(ColumnInfo):
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
+
+
+@dataclass
+class VirtualEntityColumnInfo(EntityColumnInfo):
+    node: QueryGraphVariableNode
+
+    def __repr__(self) -> str:
+        return f"virtual::{self.node.variable.name}"
+
     def __hash__(self):
         return super().__hash__()
 
@@ -221,7 +240,12 @@ class AggregateColumnInfo(ColumnInfo):
 @dataclass
 class QueryGraph:
     query: ParsedQuery
+
     columns: List[ColumnInfo]
+
+    # NOTE "virtual" columns, i.e., columns that will not appear as part of the result.
+    #       This includes variables that exclusively appear as part of aggregates, etc.
+    vcolumns: List[ColumnInfo]
 
     nodes: List[QueryGraphNode]
     edges: List[QueryGraphPropertyEdge]
@@ -254,6 +278,7 @@ class QueryGraph:
 
 def query2aqg(pq: ParsedQuery) -> QueryGraph:
     columns: List[ColumnInfo] = []
+    vcolumns: List[ColumnInfo] = []
     nodes: List[QueryGraphNode] = []
     edges: List[QueryGraphPropertyEdge] = []
     filters: List[QueryGraphFilter] = []
@@ -377,11 +402,12 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                             id_=new_id(), constant=clause.predicate
                         )
                     )
+                    arg2node[clause.predicate] = nodes[-1]
                 edges.append(
-                    QueryGraphConstPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.arguments[1]],
-                        property=clause.predicate,
+                        property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
             else:
@@ -410,6 +436,7 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
         if isinstance(item, Aggregation):
             assert item.var in arg2node
             aggregate_node = QueryGraphGeneratedNode(id_=new_id())
+            nodes.append(aggregate_node)
             aggregates.append(
                 QueryGraphAggregate(
                     source=arg2node[item.var], target=aggregate_node, type_=item.type_  # type: ignore
@@ -421,9 +448,15 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
         if isinstance(item, Variable):
             columns.append(HeadVariableColumnInfo(node=arg2node[item]))  # type: ignore
 
+    for node in nodes:
+        if isinstance(node, QueryGraphVariableNode):
+            if node not in columns:
+                vcolumns.append(VirtualEntityColumnInfo(node))
+
     graph = QueryGraph(
         query=pq,
         columns=columns,
+        vcolumns=vcolumns,
         nodes=nodes,
         edges=edges,
         filters=filters,

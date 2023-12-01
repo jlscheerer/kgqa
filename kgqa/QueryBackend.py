@@ -46,6 +46,8 @@ class QueryBackend(abc.ABC):
         for column in self.graph.columns:
             if column.node.id_ == node_id:
                 return column
-        print(node_id)
-        print(*self.graph.nodes, sep="\n")
+
+        for column in self.graph.vcolumns:
+            if column.node.id_ == node_id:
+                return column
         raise AssertionError("attempting to get column info for invalid node")
