@@ -85,7 +85,7 @@ CREATE TABLE claims_inv AS (
 );
 DROP TABLE claims;
 
-CREATE TABLE entity_populatarity AS (
+CREATE TABLE entity_popularity AS (
   SELECT entity_id, COUNT(*)
   FROM claims_inv
   GROUP BY entity_id
@@ -128,3 +128,5 @@ CREATE INDEX idx_labels_en_id ON labels_en (id);
 
 -- CREATE INDEX idx_descriptions_id ON descriptions (id); --
 CREATE INDEX idx_descriptions_en_id ON descriptions_en (id);
+
+CREATE INDEX idx_entity_popularity_id ON entity_popularity (entity_id);

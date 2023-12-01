@@ -1,14 +1,10 @@
 import os
 import re
-from collections import defaultdict
 
 import faiss
-import json
 from kgqa.FaissIndex import faiss_id_to_int, faiss_int_to_id
 import numpy as np
-import pandas as pd
 from yaspin import yaspin
-import pickle
 from tqdm import tqdm
 
 from kgqa.Config import Config
@@ -28,11 +24,6 @@ def _read_strs_from_file(filename):
         return [x.strip() for x in file.readlines()]
 
 
-def _dump_pickle_to_file(filename, data):
-    with open(filename, "wb") as file:
-        pickle.dump(data, file)
-
-
 def extract_db_labels():
     config = Config()
     db = Database()
@@ -41,7 +32,7 @@ def extract_db_labels():
     SELECT id, value
     FROM labels_en
     WHERE starts_with(id, 'Q')
-    ORDER BY id
+    ORDER BY SUBSTRING(id FROM '[0-9]+$')::int
     """
 
     BATCH_SIZE = config["embeddings"]["batch_size"]
@@ -128,7 +119,8 @@ def compute_faiss_index():
     )
     idx = faiss.IndexIDMap(embeddings_idx)
 
-    embeddings_files = _get_label_embeddings_files()
+    num_files = config["embeddings"]["count"] // config["embeddings"]["batch_size"]
+    embeddings_files = _get_label_embeddings_files()[:num_files]
 
     for label_embeddings_file in tqdm(embeddings_files):
         file = config.file_in_directory("embeddings", label_embeddings_file)

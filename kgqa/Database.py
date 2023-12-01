@@ -45,7 +45,10 @@ class Database(metaclass=Singleton):
             )
             self.relations = Relations(labels, embeddings, ids)
         except:
-            print("[Warning] Database unable to load embeddings. If you have not generated the embeddings yet ignore this warning.", file=sys.stderr)
+            print(
+                "[Warning] Database unable to load embeddings. If you have not generated the embeddings yet ignore this warning.",
+                file=sys.stderr,
+            )
 
     def cursor(self):
         return self._conn.cursor()
@@ -82,10 +85,13 @@ class Database(metaclass=Singleton):
         raise AssertionError("NYI")
 
     def get_pid_to_title(self, pid):
-        return self.fetchall(f"SELECT value FROM labels_en WHERE id = '{pid}'")[0][0]
+        results = self.fetchall(f"SELECT value FROM labels_en WHERE id = '{pid}'")
+        if len(results) == 0:
+            return None
+        return results[0][0]
 
     def get_description_for_id(self, id):
-        descriptions =  self.fetchall(
+        descriptions = self.fetchall(
             f"SELECT value FROM descriptions_en WHERE id = '{id}'"
         )
         if len(descriptions) > 0:

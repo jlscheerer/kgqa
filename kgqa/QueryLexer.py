@@ -3,11 +3,13 @@ from typing import Optional, Literal, Union
 from dataclasses import dataclass
 import string
 
+TYPE_NAMES = {"entity_id", "string", "date", "numeric", "coordinate", "qualifier"}
 AGGREGATION_FUNCTIONS = {"COUNT", "SUM", "AVG", "MAX", "MIN"}
 
 
 class TokenType(Enum):
     IDENTIFIER = auto()
+    TYPE_NAME = auto()
     AGGREGATION_FUNCTION = auto()
 
     COMPARATOR = auto()
@@ -16,6 +18,9 @@ class TokenType(Enum):
     NUMERIC_LITERAL = auto()
 
     COLON = auto()
+    TYPE_INDICATOR = auto()
+    ASSIGNMENT = auto()
+
     SEMICOLON = auto()
     COMMA = auto()
 
@@ -46,6 +51,13 @@ class Identifier(TokenBase):
     name: str
 
     token_type: Literal[TokenType.IDENTIFIER] = TokenType.IDENTIFIER
+
+
+@dataclass
+class TypeName(TokenBase):
+    type_: Literal["entity_id", "string", "date", "numeric", "coordinate", "qualifier"]
+
+    token_type: Literal[TokenType.TYPE_NAME] = TokenType.TYPE_NAME
 
 
 @dataclass
@@ -88,6 +100,16 @@ class Colon(TokenBase):
 
 
 @dataclass
+class TypeIndicator(TokenBase):
+    token_type: Literal[TokenType.TYPE_INDICATOR] = TokenType.TYPE_INDICATOR
+
+
+@dataclass
+class Assignment(TokenBase):
+    token_type: Literal[TokenType.ASSIGNMENT] = TokenType.ASSIGNMENT
+
+
+@dataclass
 class Semicolon(TokenBase):
     token_type: Literal[TokenType.SEMICOLON] = TokenType.SEMICOLON
 
@@ -121,9 +143,12 @@ LiteralToken = Union[StringLiteral, NumericLiteral]
 IdentifierToken = Union[Identifier, AggregationFunction]
 Token = Union[
     IdentifierToken,
+    TypeName,
     Compator,
     LiteralToken,
     Colon,
+    TypeIndicator,
+    Assignment,
     Semicolon,
     Comma,
     OpenParen,
@@ -158,6 +183,12 @@ class QueryLexer:
         char = self._curr_char()
         if char is None:
             return None
+        elif char == ":" and self._peak_char() == "=":
+            self._advance_cursor(amount=2)
+            return Assignment(source_location=SourceLocation(loc.begin, loc.end + 1))
+        elif char == "/":
+            self._advance_cursor()
+            return TypeIndicator(source_location=loc)
         elif char == ":":
             self._advance_cursor()
             return Colon(source_location=loc)
@@ -212,6 +243,11 @@ class QueryLexer:
             self._advance_cursor()
             name += char
 
+        if name in TYPE_NAMES:
+            return TypeName(
+                source_location=SourceLocation(begin=begin, end=self._cursor),
+                type_=name,  # type: ignore
+            )
         if name.upper() in AGGREGATION_FUNCTIONS:
             return AggregationFunction(
                 source_location=SourceLocation(begin=begin, end=self._cursor),
