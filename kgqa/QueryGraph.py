@@ -85,6 +85,17 @@ class QueryGraphEntityConstantNode(QueryGraphConstantNode):
 
 
 @dataclass
+class QueryGraphPropertyConstantNode(QueryGraphConstantNode):
+    constant: IDConstant
+
+    pids: List[str] = field(default_factory=list)
+    scores: List[float] = field(default_factory=list)
+
+    def mark_executable(self):
+        self.pids, self.scores = [self.constant.value], [1.0]
+
+
+@dataclass
 class QueryGraphGeneratedNode(QueryGraphNode):
     pass
 
@@ -100,26 +111,7 @@ class QueryGraphEdge(abc.ABC):
 
 @dataclass
 class QueryGraphPropertyEdge(QueryGraphEdge):
-    property: Union[QueryGraphPropertyNode, IDConstant]
-
-    pids: List[str] = field(default_factory=list)
-    scores: List[float] = field(default_factory=list)
-
-
-@dataclass
-class QueryGraphDynPropertyEdge(QueryGraphPropertyEdge):
-    property: QueryGraphPropertyNode
-
-    def mark_executable(self):
-        self.pids, self.scores = self.property.pids, self.property.scores
-
-
-@dataclass
-class QueryGraphConstPropertyEdge(QueryGraphPropertyEdge):
-    property: IDConstant
-
-    def mark_executable(self):
-        self.pids, self.scores = [self.property.value], [1.0]
+    property: Union[QueryGraphPropertyNode, QueryGraphPropertyConstantNode]
 
 
 @dataclass
@@ -133,6 +125,7 @@ class QueryGraphAggregate(QueryGraphEdge):
     target: QueryGraphGeneratedNode
 
     type_: AggregationType
+    distinct: bool = False
 
 
 @dataclass
@@ -146,10 +139,22 @@ class ColumnInfo(abc.ABC):
         """
         pass
 
+    def __hash__(self):
+        return hash(self.node.id_.value)
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return False
+        return self.node.id_ == other.node.id_
+
 
 @dataclass
 class EntityColumnInfo(ColumnInfo):
-    pass
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
 
 @dataclass
@@ -158,6 +163,12 @@ class HeadVariableColumnInfo(EntityColumnInfo):
 
     def __repr__(self) -> str:
         return self.node.variable.name
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
 
 @dataclass
@@ -168,6 +179,12 @@ class AnchorEntityColumnInfo(EntityColumnInfo):
         assert isinstance(self.node.constant, StringConstant)
         return f"{self.node.constant.value} (QID)"
 
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
+
 
 @dataclass
 class PropertyColumnInfo(ColumnInfo):
@@ -175,6 +192,12 @@ class PropertyColumnInfo(ColumnInfo):
 
     def __repr__(self) -> str:
         return f"{self.node.property} (PID)"
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
 
 @dataclass
@@ -187,6 +210,12 @@ class AggregateColumnInfo(ColumnInfo):
 
     def __repr__(self) -> str:
         return f"{self.aggregate.type_.name}({self.aggregate.source.variable.name})"
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
 
 @dataclass
@@ -287,32 +316,39 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                     arg2node[clause.predicate] = nodes[-1]
                     columns.append(PropertyColumnInfo(node=arg2node[clause.predicate]))  # type: ignore
                 edges.append(
-                    QueryGraphDynPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.qualifier],
                         property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
                 edges.append(
-                    QueryGraphDynPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.qualifier],
                         target=arg2node[clause.arguments[1]],
                         property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
-            elif isinstance(clause.predicate, Constant):
+            elif isinstance(clause.predicate, IDConstant):
+                if clause.predicate not in arg2node:
+                    nodes.append(
+                        QueryGraphPropertyConstantNode(
+                            id_=new_id(), constant=clause.predicate
+                        )
+                    )
+                    arg2node[clause.predicate] = nodes[-1]
                 edges.append(
-                    QueryGraphConstPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.qualifier],
-                        property=clause.predicate,
+                        property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
                 edges.append(
-                    QueryGraphConstPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.qualifier],
                         target=arg2node[clause.arguments[1]],
-                        property=clause.predicate,
+                        property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
             else:
@@ -328,13 +364,19 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                     arg2node[clause.predicate] = nodes[-1]
                     columns.append(PropertyColumnInfo(node=arg2node[clause.predicate]))  # type: ignore
                 edges.append(
-                    QueryGraphDynPropertyEdge(
+                    QueryGraphPropertyEdge(
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.arguments[1]],
                         property=arg2node[clause.predicate],  # type: ignore
                     )
                 )
-            elif isinstance(clause.predicate, Constant):
+            elif isinstance(clause.predicate, IDConstant):
+                if clause.predicate not in arg2node:
+                    nodes.append(
+                        QueryGraphPropertyConstantNode(
+                            id_=new_id(), constant=clause.predicate
+                        )
+                    )
                 edges.append(
                     QueryGraphConstPropertyEdge(
                         source=arg2node[clause.arguments[0]],

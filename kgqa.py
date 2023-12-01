@@ -10,7 +10,7 @@ from kgqa.NonIsomorphicSearch import infer_n_hops_predicate
 
 from kgqa.Preferences import Preferences
 
-# from kgqa.QueryBackend import QueryString
+from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import (
@@ -19,11 +19,10 @@ from kgqa.QueryParser import (
     QueryParserExceptionWithNote,
 )
 
-# from kgqa.PostProcessing import run_and_rank
+from kgqa.PostProcessing import run_and_rank
 from kgqa.MatchingUtils import compute_similar_entities, compute_similar_properties
 from kgqa.Database import Database
-
-# from kgqa.SPARQLBackend import wqg2sparql
+from kgqa.SPARQLBackend import wqg2sparql
 
 
 def _display_query_results(results, columns):
@@ -72,10 +71,12 @@ def _handle_user_query(query: str):
                 f"trying to emit code for unknown backend: '{backend}'"
             )
 
-        with yaspin(text="Executing Query on Wikidata..."):
-            results, columns = run_and_rank(qs, wqg)
+        print(qs.value)
+        print(qs.col2name)
+        # with yaspin(text="Executing Query on Wikidata..."):
+        #     results, columns = run_and_rank(qs, wqg)
 
-        _display_query_results(results, columns)
+        # _display_query_results(results, columns)
     except QueryLexerException as err:
         _annotate_parser_error(query, err.source_location, err.error)
         return

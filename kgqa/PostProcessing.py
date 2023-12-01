@@ -1,27 +1,21 @@
-from typing import Dict
-import pandas as pd
-
-from kgqa.Database import Database
-from kgqa.Preferences import Preferences
-from kgqa.QueryBackend import QueryString
-from kgqa.QueryGraph import (
+from .Database import Database
+from .Preferences import Preferences
+from .QueryBackend import QueryString
+from .QueryGraph import (
     AggregateColumnInfo,
     AnchorEntityColumnInfo,
-    ColumnInfo,
-    ExecutableQueryGraph,
-    HeadEntityColumnInfo,
+    QueryGraph,
+    HeadVariableColumnInfo,
     PropertyColumnInfo,
-    QueryStatistics,
+    QueryGraphEntityConstantNode,
 )
-from kgqa.QueryParser import IDConstant, StringConstant
-from kgqa.SPARQLBackend import SPARQLQuery
-from kgqa.sparql2sql import sparql2sql
+from .QueryParser import IDConstant, StringConstant
+from .SPARQLBackend import SPARQLQuery
+from .sparql2sql import sparql2sql
 
 
-def run_and_rank(query: QueryString, wqg: ExecutableQueryGraph, stats: QueryStatistics):
+def run_and_rank(query: QueryString, wqg: QueryGraph):
     if isinstance(query, SPARQLQuery):
-        col2name: Dict[ColumnInfo, str] = stats.meta["col2name"]
-
         if Preferences()["print_sparql"] == "true":
             print("========== [SPARQL] ==========")
             print(query.value)
@@ -30,35 +24,30 @@ def run_and_rank(query: QueryString, wqg: ExecutableQueryGraph, stats: QueryStat
         sql = sparql2sql(query)
         db = Database()
         results, column_names = db.fetchall(sql.value, return_column_names=True)
-
-        if column_names != [
-            f"?Z{column.aggregate_index}"
-            if isinstance(column, AggregateColumnInfo)
-            else col2name[column]
-            for column in stats.columns
-        ]:
-            raise AssertionError("received unexpected table format from database")
     else:
         raise AssertionError(f"cannot run_and_rank query '{query}'")
 
-    user_column_names = [f"{column}" for column in stats.columns]
+    user_column_names = [f"{column}" for column in wqg.columns]
 
     # TODO(jlscheerer) Refactor this code to use dataframes and query only once.
     annotated_results = []
     for row in results:
         annotated_row = []
         row_score = 1.0
-        for id, col in zip(row, stats.columns):
+        for id, col in zip(row, wqg.columns):
             # TODO(jlscheerer) Refactor this, because both are the same anyways.
             if isinstance(col, PropertyColumnInfo):
-                score = stats.pid2scores[col.predicate.query_name()][id]
+                score = col.node.scores[id]
             elif isinstance(col, AnchorEntityColumnInfo):
-                node = wqg.nodes[col.index.value]
-                assert isinstance(node.value, IDConstant) or isinstance(
-                    node.value, StringConstant
+                node = col.node
+                assert isinstance(node.constant, IDConstant) or isinstance(
+                    node.constant, StringConstant
                 )
-                score = stats.qid2scores[node.value.value][id]
-            elif isinstance(col, HeadEntityColumnInfo):
+                if isinstance(node, QueryGraphEntityConstantNode):
+                    score = node.scores[id]
+                else:
+                    score = 1.0
+            elif isinstance(col, HeadVariableColumnInfo):
                 score = None  # Entity is retrieved. Thus, we have no score
             elif isinstance(col, AggregateColumnInfo):
                 score = None
