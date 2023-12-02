@@ -6,6 +6,7 @@ from kgqa.FaissServer import FaissServer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="faiss_server")
+    parser.add_argument("-n", "--num")
     parser.add_argument("-d", "--debug", action="store_true")
     args = parser.parse_args()
 
@@ -13,7 +14,7 @@ if __name__ == "__main__":
         print("Enabling debug mode for FaissServer")
         FaissServer.debug_mode = True
     else:
-        _ = FaissIndexDirectory()
+        _ = FaissIndexDirectory(n_shards=int(args.num))
     print("FaissServer successfully loaded Index Directory.")
 
     config = Config()["embeddings"]["server"]
