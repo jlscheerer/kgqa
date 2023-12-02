@@ -19,14 +19,26 @@ from .Transformers import Transformer
 from .Database import Database
 
 # NOTE Ranking weight contributions.
-LABEL_WEIGHT = 0.55
-DESCRIPTION_WEIGHT = 0.15
-POPULARITY_WEIGHT = 0.3
+ENTITY_WEIGHTS = {
+    "LABEL_WEIGHT": 0.55,
+    "DESCRIPTION_WEIGHT": 0.15,
+    "POPULARITY_WEIGHT": 0.3
+}
 
-POPULARITY_SCALE = 100
+# NOTE We place significantly more emphasis on the description.
+#      This is because the label corresponds more closely to
+#      the description for properties, in contrast to entities.
+PROPERTY_WEIGHTS = {
+    "LABEL_WEIGHT": 0.35,
+    "DESCRIPTION_WEIGHT": 0.4,
+    "POPULARITY_WEIGHT": 0.25
+}
 
-NUM_RESULTS = 10
+ENTITY_POPULARITY_SCALE = 100
+PROPERTY_POPULARITY_SCALE = 250000
 
+# TODO(jlscheerer) Change this for properties/entities.
+NUM_RESULTS = 5
 
 def faiss_id_to_int(id):
     assert id[0] in ["P", "Q"]
@@ -91,7 +103,9 @@ class ShardedFaissIndex:
 
 
 class FaissIndex:
-    def __init__(self, index):
+    def __init__(self, type_, index):
+        assert type_ in ["entity", "property"]
+        self.type_ = type_
         self._index = index
 
     def search(self, needle, count):
@@ -117,10 +131,12 @@ class FaissIndex:
             popularity_score = self._popularity_score(meta[id]["popularity"])
             dscores.append(description_score)
             pscores.append(popularity_score)
+
+            weights = ENTITY_WEIGHTS if self.type_ == "entity" else PROPERTY_WEIGHTS
             scores.append(
-                LABEL_WEIGHT * faiss_score
-                + DESCRIPTION_WEIGHT * description_score
-                + POPULARITY_WEIGHT * popularity_score
+                weights["LABEL_WEIGHT"] * faiss_score
+                + weights["DESCRIPTION_WEIGHT"] * description_score
+                + weights["POPULARITY_WEIGHT"] * popularity_score
             )
 
         df = pd.DataFrame(
@@ -150,17 +166,24 @@ class FaissIndex:
         )
 
     def _popularity_score(self, popularity):
-        return sigmoid(popularity / POPULARITY_SCALE)
+        if popularity is None:
+            popularity = 0
+        if self.type_ == "entity":
+            return sigmoid(popularity / ENTITY_POPULARITY_SCALE)
+        elif self.type_ == "property":
+            return sigmoid(popularity / PROPERTY_POPULARITY_SCALE)
+        else:
+            assert False
 
     def _retrieve_meta(self, ids):
         db = Database()
-        entity_ids = ", ".join([f"'{id}'" for id in ids])
+        wiki_ids = ", ".join([f"'{id}'" for id in ids])
         meta_data_rows = db.fetchall(
             f"""
         SELECT l.id, l.value, d.value, p.count
         FROM labels_en l LEFT JOIN descriptions_en d   ON (l.id = d.id) 
-                         LEFT JOIN entity_popularity p ON(l.id = p.entity_id)
-        WHERE entity_id IN ({entity_ids})
+                         LEFT JOIN {self.type_}_popularity p ON (l.id = p.id)
+        WHERE l.id IN ({wiki_ids})
         """
         )
         return {
@@ -185,8 +208,9 @@ class FaissIndexDirectory(metaclass=Singleton):
         if n_shards is None:
             n_shards = len(shards)
 
-        self.labels = FaissIndex(ShardedFaissIndex(shards[:n_shards]))
+        self.labels = FaissIndex("entity", ShardedFaissIndex(shards[:n_shards]))
         self.properties = FaissIndex(
+            "property",
             faiss.read_index(
                 config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS)
             )
