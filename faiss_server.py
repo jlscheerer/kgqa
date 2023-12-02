@@ -14,7 +14,7 @@ if __name__ == "__main__":
         print("Enabling debug mode for FaissServer")
         FaissServer.debug_mode = True
     else:
-        _ = FaissIndexDirectory(n_shards=int(args.num))
+        _ = FaissIndexDirectory(n_shards=int(args.num) if args.num is not None else None)
     print("FaissServer successfully loaded Index Directory.")
 
     config = Config()["embeddings"]["server"]
