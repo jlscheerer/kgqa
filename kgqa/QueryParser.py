@@ -652,6 +652,7 @@ class QueryParser:
                 source_location=clause.predicate.token.source_location,
                 value=type_.name,
             )
+            # TODO(jlscheerer) It might also make sense to include occupation here.
             clauses.append(
                 QueryClause(
                     predicate=IDConstant(

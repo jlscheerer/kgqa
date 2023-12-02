@@ -85,10 +85,18 @@ CREATE TABLE claims_inv AS (
 );
 DROP TABLE claims;
 
+-- NOTE These tables should be created after having populated claims_inv with
+--      with the inverted predicates.
 CREATE TABLE entity_popularity AS (
-  SELECT entity_id, COUNT(*)
+  SELECT entity_id AS id, COUNT(*) AS count
   FROM claims_inv
   GROUP BY entity_id
+);
+
+CREATE TABLE property_popularity AS (
+  SELECT property AS id, COUNT(*) AS count
+  FROM claims_inv
+  GROUP BY property
 );
 
 -- `qualifiers` requires additional preprocessing through wd-migrate.
@@ -129,4 +137,6 @@ CREATE INDEX idx_labels_en_id ON labels_en (id);
 -- CREATE INDEX idx_descriptions_id ON descriptions (id); --
 CREATE INDEX idx_descriptions_en_id ON descriptions_en (id);
 
-CREATE INDEX idx_entity_popularity_id ON entity_popularity (entity_id);
+CREATE INDEX idx_entity_popularity_id ON entity_popularity (id);
+
+CREATE INDEX idx_property_popularity_id ON property_popularity (id);
