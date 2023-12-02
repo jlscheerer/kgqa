@@ -114,25 +114,27 @@ def compute_faiss_index():
 
     EMBEDDINGS_SIZE = 384  # embeddings.shape[1]
     factory_settings = "Flat"
-    embeddings_idx = faiss.index_factory(
-        EMBEDDINGS_SIZE, factory_settings, faiss.METRIC_INNER_PRODUCT
-    )
-    idx = faiss.IndexIDMap(embeddings_idx)
 
-    num_files = config["embeddings"]["count"] // config["embeddings"]["batch_size"]
-    embeddings_files = _get_label_embeddings_files()[:num_files]
+    num_files_per_shard = config["embeddings"]["count"] // config["embeddings"]["batch_size"]
+    embeddings_files = _get_label_embeddings_files()
 
-    for label_embeddings_file in tqdm(embeddings_files):
-        file = config.file_in_directory("embeddings", label_embeddings_file)
-        ids = _preprocess_ids_to_np(
-            config.file_in_directory(
-                "embeddings", _emb_file_to_qids_file(label_embeddings_file)
-            )
+    for shard_start_index in range(0, len(embeddings_files), num_files_per_shard):
+        print(f"Constructing Index for shard-{shard_start_index // num_files_per_shard}")
+        embeddings_idx = faiss.index_factory(
+            EMBEDDINGS_SIZE, factory_settings, faiss.METRIC_INNER_PRODUCT
         )
-        embeddings = np.load(file)
-        idx.add_with_ids(embeddings, ids)
+        idx = faiss.IndexIDMap(embeddings_idx)
+        for label_embeddings_file in tqdm(embeddings_files[shard_start_index : shard_start_index + num_files_per_shard]):
+            file = config.file_in_directory("embeddings", label_embeddings_file)
+            ids = _preprocess_ids_to_np(
+                config.file_in_directory(
+                    "embeddings", _emb_file_to_qids_file(label_embeddings_file)
+                )
+            )
+            embeddings = np.load(file)
+            idx.add_with_ids(embeddings, ids)
 
-    faiss.write_index(idx, config.file_in_directory("embeddings", FILENAME_FAISS_INDEX))
+        faiss.write_index(idx, config.file_in_directory("embeddings", f"shard{shard_start_index // num_files_per_shard}_{FILENAME_FAISS_INDEX}"))
 
 
 def extract_db_properties_en():

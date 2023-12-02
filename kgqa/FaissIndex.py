@@ -1,7 +1,13 @@
+import os
+from math import exp
+import time
+import concurrent.futures
+import multiprocessing
+
 import faiss
 import numpy as np
-from math import exp
 import pandas as pd
+from tqdm import tqdm
 
 from .Constants import (
     FILENAME_FAISS_INDEX,
@@ -21,6 +27,7 @@ POPULARITY_SCALE = 100
 
 NUM_RESULTS = 10
 
+
 def faiss_id_to_int(id):
     assert id[0] in ["P", "Q"]
     val = int(id[1:])
@@ -37,10 +44,55 @@ def sigmoid(x):
     return 1 / (1 + exp(-x))
 
 
+class ShardedFaissIndex:
+    def __init__(self, shards, print_time=True):
+        config = Config()
+        print("Loading sharded FaissIndex")
+        self.shards = []
+        for shard in tqdm(shards):
+            self.shards.append(
+                faiss.read_index(config.file_in_directory("embeddings", shard))
+            )
+
+        self.executor = concurrent.futures.ThreadPoolExecutor(len(self.shards))
+        self.print_time = print_time
+
+    def search(self, embeddings, count):
+        # NOTE We could easily support batching here.
+        def _search(out_D, out_I, index, shard, embeddings, count):
+            faiss_scores, faiss_ids = shard.search(embeddings, count)
+            out_D[index, :] = faiss_scores
+            out_I[index, :] = faiss_ids
+
+        if self.print_time:
+            tik = time.time()
+
+        shard_D = np.zeros((len(self.shards), count), dtype="float32")
+        shard_I = np.zeros((len(self.shards), count), dtype="int64")
+
+        futures = {}
+        for index, shard in enumerate(self.shards):
+            args = (_search, shard_D, shard_I, index, shard, embeddings, count)
+            futures[self.executor.submit(*args)] = index
+        concurrent.futures.wait(futures)
+
+        sD = shard_D.ravel()
+        topK = sD.argsort()[::-1][:count]
+        sI = shard_I.ravel()
+
+        faiss_scores, faiss_ids = sD[topK], sI[topK]
+
+        if self.print_time:
+            tok = time.time()
+            print("Sharded Search Took", tok - tik)
+
+        print(faiss_scores, faiss_ids)
+        return np.expand_dims(faiss_scores, axis=0), np.expand_dims(faiss_ids, axis=0)
+
+
 class FaissIndex:
     def __init__(self, index):
-        config = Config()
-        self._index = faiss.read_index(config.file_in_directory("embeddings", index))
+        self._index = index
 
     def search(self, needle, count):
         # TODO(jlscheerer) Support batching queries.
@@ -91,7 +143,11 @@ class FaissIndex:
                 break
             results[row["id"]] = row["score"]
 
-        return list(df["id"][:NUM_RESULTS]), list(df["label"][:NUM_RESULTS]), list(df["score"][:NUM_RESULTS])
+        return (
+            list(df["id"][:NUM_RESULTS]),
+            list(df["label"][:NUM_RESULTS]),
+            list(df["score"][:NUM_RESULTS]),
+        )
 
     def _popularity_score(self, popularity):
         return sigmoid(popularity / POPULARITY_SCALE)
@@ -117,6 +173,21 @@ class FaissIndex:
 
 
 class FaissIndexDirectory(metaclass=Singleton):
-    def __init__(self):
-        self.labels = FaissIndex(FILENAME_FAISS_INDEX)
-        self.properties = FaissIndex(FILENAME_PROPERTY_FAISS)
+    def __init__(self, n_shards=None):
+        config = Config()
+        shards = [
+            file
+            for file in os.listdir(config.directory("embeddings"))
+            if file.startswith("shard") and file.endswith(FILENAME_FAISS_INDEX)
+        ]
+        shards.sort(key=lambda x: int(x[len("shard") :].split("_", 1)[0]))
+
+        if n_shards is None:
+            n_shards = len(shards)
+
+        self.labels = FaissIndex(ShardedFaissIndex(shards[:n_shards]))
+        self.properties = FaissIndex(
+            faiss.read_index(
+                config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS)
+            )
+        )
