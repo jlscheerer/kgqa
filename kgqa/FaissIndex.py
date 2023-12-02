@@ -1,7 +1,11 @@
+import os
+from math import exp
+import time
+
 import faiss
 import numpy as np
-from math import exp
 import pandas as pd
+from tqdm import tqdm
 
 from .Constants import (
     FILENAME_FAISS_INDEX,
@@ -36,6 +40,38 @@ def faiss_int_to_id(val):
 def sigmoid(x):
     return 1 / (1 + exp(-x))
 
+
+class ShardedFaissIndex:
+    def __init__(self, shards):
+        config = Config()
+        print("Loading sharded FaissIndex")
+        self.shards = []
+        for shard in tqdm(shards):
+            self.shards.append(faiss.read_index(config.file_in_directory("embeddings", shard)))
+
+    def search(self, needle, count):
+        tik = time.time()
+        shard_D = np.zeros((len(self.shards), count), dtype="float32")
+        shard_I = np.zeros((len(self.shards), count), dtype="int64")
+
+        embeddings = np.array([Transformer().encode(needle)])
+        for i, shard in enumerate(self.shards):
+            faiss_scores, faiss_ids = shard.search(
+                embeddings, count
+            )
+            shard_D[i, :] = faiss_scores
+            shard_I[i, :] = faiss_ids
+
+        sD = shard_D.ravel()
+        topK = sD.argsort()[::-1][:count]
+        sI = shard_I.ravel()
+
+        faiss_scores, faiss_ids = sD[topK], sI[topK]
+        ids = [faiss_int_to_id(id) for id in faiss_ids]
+
+        tok = time.time()
+        print("Search Took", tok - tik)
+        print(ids)
 
 class FaissIndex:
     def __init__(self, index):
@@ -118,5 +154,13 @@ class FaissIndex:
 
 class FaissIndexDirectory(metaclass=Singleton):
     def __init__(self):
+        config = Config()
+        shards = [file for file in os.listdir(config.directory("embeddings")) if file.startswith("shard") and file.endswith(FILENAME_FAISS_INDEX)]
+        shards.sort(key=lambda x: int(x[len("shard"):].split("_", 1)[0]))
+
+        labels = ShardedFaissIndex(shards[:2])
+
+        labels.search("Dorothea Steiner", 5)
+        exit(-1)
         self.labels = FaissIndex(FILENAME_FAISS_INDEX)
         self.properties = FaissIndex(FILENAME_PROPERTY_FAISS)
