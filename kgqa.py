@@ -1,6 +1,7 @@
 import traceback
 import pydoc
-import readline  # noqa # pylint: disable=unused-import
+import readline
+import os
 
 from typing import List
 from yaspin import yaspin
@@ -9,7 +10,7 @@ from termcolor import colored
 from kgqa.NonIsomorphicSearch import infer_n_hops_predicate
 
 from kgqa.Preferences import Preferences
-
+from kgqa.Config import Config
 from kgqa.QueryBackend import QueryString
 from kgqa.QueryGraph import QueryGraphSerializer, query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
@@ -210,6 +211,10 @@ def _handle_builtin_set(args: List[str]) -> bool:
 def _handle_user_builtin(command: str) -> bool:
     builtin, *args = command.split()
     if builtin == ".exit":
+        config = Config()
+        if config["history"]["enabled"]:
+            session_history = config.file_in_directory("history", ".session_history")
+            readline.write_history_file(session_history)
         return False
     elif builtin == ".help":
         return _handle_user_help()
@@ -241,6 +246,12 @@ def _handle_user_command(command: str) -> bool:
 
 
 def main():
+    config = Config()
+    if config["history"]["enabled"]:
+        session_history = config.file_in_directory("history", ".session_history")
+        if os.path.exists(session_history):
+            readline.read_history_file(session_history)
+
     intc = 0
     while True:
         try:
@@ -252,8 +263,7 @@ def main():
             print()
             intc += 1
             if intc > 1:
-                print(colored("aborting session due to keyboard interrupt", "red"))
-                break
+                print(colored("abort session using .exit command.", "red"))
 
 
 if __name__ == "__main__":
