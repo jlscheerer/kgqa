@@ -2,12 +2,14 @@ from enum import Enum, auto
 import inspect
 from typing import Generic, List, Set, Tuple, TypeVar, Union, Optional
 from dataclasses import dataclass
-from kgqa.QueryBackend import QueryString
+import re
+import typing
 
 from rdflib.plugins import sparql
 from rdflib import term
 
-from kgqa.SPARQLBackend import SPARQLQuery
+from .QueryBackend import QueryString
+from .SPARQLBackend import SPARQLQuery
 
 T = TypeVar("T")
 
@@ -39,6 +41,14 @@ class Variable:
 
     def __hash__(self):
         return hash(self.name)
+
+
+@dataclass
+class SPARQLVariableTypeInfo:
+    variable: Variable
+    type_: typing.Literal[
+        "entity_id", "string", "date", "numeric", "coordinate", "qualifier"
+    ]
 
 
 @dataclass
@@ -115,6 +125,7 @@ class ParsedSPARQLQuery:
     triples: Optional[List[Triple]]
     filters: Optional[List[Expression]]
     group_by: Optional[List[Variable]]
+    type_info: List[SPARQLVariableTypeInfo]
 
 
 def _parse_sparql_variable(var: term.Variable) -> Variable:
@@ -264,6 +275,16 @@ def _parse_sparql_group_by(group_by):
 
 
 def parse_sparql_query(query: str, assert_wiki=True) -> ParsedSPARQLQuery:
+    type_info = re.findall(
+        "#pragma:type \\?([^\\s]+) (string|entity_id|date|numeric|coordinate|qualifier)\n",
+        query,
+    )
+    types: List[SPARQLVariableTypeInfo] = []
+    for var_name, type_ in type_info:
+        types.append(
+            SPARQLVariableTypeInfo(variable=Variable(name=var_name), type_=type_)
+        )
+
     parsed = sparql.parser.parseQuery(query)[1]
     projection = _parse_sparql_projection(parsed["projection"])
     triples, filter = _parse_sparql_where(parsed["where"], assert_wiki=assert_wiki)
@@ -271,7 +292,7 @@ def parse_sparql_query(query: str, assert_wiki=True) -> ParsedSPARQLQuery:
         _parse_sparql_group_by(parsed["groupby"]) if "groupby" in parsed else None
     )
 
-    return ParsedSPARQLQuery(projection, triples, filter, group_by)
+    return ParsedSPARQLQuery(projection, triples, filter, group_by, type_info=types)
 
 
 class SQLTranspiler:
@@ -408,6 +429,26 @@ class SQLTranspiler:
         assert len(where_conds) > 0
         return " AND ".join(where_conds)
 
+    def _sql_type_for_variable(self, variable: Variable):
+        if len(self.query.type_info) == 0:
+            return "entity_id"
+        for type_ in self.query.type_info:
+            if type_.variable == variable:
+                return self._sql_type(type_.type_)
+        raise AssertionError
+
+    def _sql_type(self, type_):
+        # Only applies to object; not the subject!
+        if type_ == "entity_id":
+            return "datavalue_entity"
+        elif type_ == "string":
+            return "datavalue_string"
+        elif type_ == "date":
+            return "datavalue_date"
+        elif type_ == "numeric":
+            return "datavalue_quantity"
+        raise AssertionError
+
     def _emit_sql_group_by(self, group_by: List[Variable]):
         return ", ".join([f"{self._find_references(var)[0]}" for var in group_by])
 
@@ -453,11 +494,12 @@ class SQLTranspiler:
             )
         for index, triple in enumerate(self.query.triples):
             if var == triple.subj:
+                assert self._sql_type_for_variable(var) == "datavalue_entity"
                 refs.append(f"c{index}.entity_id")
             elif var == triple.pred:
                 refs.append(f"c{index}.property")
             elif var == triple.obj:
-                refs.append(f"c{index}.datavalue_entity")
+                refs.append(f"c{index}.{self._sql_type_for_variable(var)}")
         if len(refs) == 0:
             raise AssertionError(f"could not find reference for variable: {var}")
         return refs
