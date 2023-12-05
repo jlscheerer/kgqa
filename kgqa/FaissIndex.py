@@ -20,9 +20,9 @@ from .Database import Database
 
 # NOTE Ranking weight contributions.
 ENTITY_WEIGHTS = {
-    "LABEL_WEIGHT": 0.55,
+    "LABEL_WEIGHT": 0.6,
     "DESCRIPTION_WEIGHT": 0.15,
-    "POPULARITY_WEIGHT": 0.3
+    "POPULARITY_WEIGHT": 0.25
 }
 
 # NOTE We place significantly more emphasis on the description.

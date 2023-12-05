@@ -2,6 +2,8 @@ import abc
 from dataclasses import dataclass, field
 from typing import Dict, List, Union
 
+import graphviz
+
 from .MatchingUtils import compute_similar_entities, compute_similar_properties
 from .QueryParser import (
     Aggregation,
@@ -280,6 +282,38 @@ class QueryGraph:
             edge.mark_executable()
 
         self.executable = True
+
+
+class QueryGraphSerializer:
+    def __init__(self, qg: QueryGraph):
+        self.qg = qg
+        self.dot = None
+
+    def serialize(self):
+        dot = graphviz.Digraph("serialized-query-graph")
+        self._add_graph_nodes(dot)
+        self._add_edges(dot)
+        print(dot.source)
+
+    def _add_graph_nodes(self, dot):
+        for node in self.qg.nodes:
+            if isinstance(node, QueryGraphVariableNode):
+                dot.node(self._node_id(node), f"Variable({node.variable.name})")
+            elif isinstance(node, QueryGraphEntityConstantNode):
+                dot.node(self._node_id(node), f'Entity("{node.constant.value}")')
+            elif isinstance(node, QueryGraphPropertyNode):
+                dot.node(self._node_id(node), f'Property("{node.property}")')
+            else:
+                print(node.__class__.__name__)
+                raise AssertionError
+
+    def _add_edges(self, dot):
+        for edge in self.qg.edges:
+            dot.edge(self._node_id(edge.source), self._node_id(edge.property))
+            dot.edge(self._node_id(edge.property), self._node_id(edge.target))
+
+    def _node_id(self, node: QueryGraphNode) -> str:
+        return str(node.id_.value)
 
 
 def query2aqg(pq: ParsedQuery) -> QueryGraph:

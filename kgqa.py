@@ -11,12 +11,13 @@ from kgqa.NonIsomorphicSearch import infer_n_hops_predicate
 from kgqa.Preferences import Preferences
 
 from kgqa.QueryBackend import QueryString
-from kgqa.QueryGraph import query2aqg, aqg2wqg
+from kgqa.QueryGraph import QueryGraphSerializer, query2aqg, aqg2wqg
 from kgqa.QueryLexer import QueryLexerException, SourceLocation
 from kgqa.QueryParser import (
     QueryParser,
     QueryParserException,
     QueryParserExceptionWithNote,
+    QuerySerializer,
 )
 from kgqa.PromptBuilder import PromptBuilder
 
@@ -72,7 +73,7 @@ def _handle_user_query(query: str):
                 f"trying to emit code for unknown backend: '{backend}'"
             )
         with yaspin(text="Executing Query on Wikidata..."):
-             results, columns = run_and_rank(qs, wqg)
+            results, columns = run_and_rank(qs, wqg)
 
         _display_query_results(results, columns)
     except QueryLexerException as err:
@@ -98,14 +99,11 @@ def _handle_user_help() -> bool:
 
 def _handle_builtin_query(args: List[str]) -> bool:
     query = " ".join(args)
-    semantiq = (
-        PromptBuilder(template="QUERY_GENERATE")
-        .set("QUERY", query)
-        .execute()
-    )
+    semantiq = PromptBuilder(template="QUERY_GENERATE").set("QUERY", query).execute()
     print("Generated Query: ", semantiq)
     _handle_user_query(semantiq)
     return True
+
 
 def _handle_builtin_entity(args: List[str]) -> bool:
     db = Database()
@@ -143,6 +141,7 @@ def _handle_builtin_search(args: List[str]) -> bool:
         infer_n_hops_predicate(predicate, n=hops)
     except:
         print("usage: .search <n-hops> <predicate>")
+        traceback.print_exc()
     return True
 
 
@@ -155,6 +154,30 @@ def _handle_builtin_parse(args: List[str]) -> bool:
             lambda token, msg: _annotate_parser_note(query, token.source_location, msg),
         )
         print(pq.canonical())
+    except QueryLexerException as err:
+        _annotate_parser_error(query, err.source_location, err.error)
+    except QueryParserException as err:
+        _annotate_parser_error(query, err.token.source_location, err.error)
+    except QueryParserExceptionWithNote as err:
+        _annotate_parser_error(query, err.token.source_location, err.error)
+        _annotate_parser_note(query, err.note_token.source_location, err.note)
+    except Exception as err:
+        print(f"Error: {err}")
+        traceback.print_exc()
+
+    return True
+
+
+def _handle_builtin_qg(args: List[str]) -> bool:
+    query = " ".join(args)
+    try:
+        qp = QueryParser()
+        pq = qp.parse(
+            query,
+            lambda token, msg: _annotate_parser_note(query, token.source_location, msg),
+        )
+        qg = query2aqg(pq)
+        QueryGraphSerializer(qg).serialize()
     except QueryLexerException as err:
         _annotate_parser_error(query, err.source_location, err.error)
     except QueryParserException as err:
@@ -200,6 +223,8 @@ def _handle_user_builtin(command: str) -> bool:
         return _handle_builtin_search(args)
     elif builtin == ".parse":
         return _handle_builtin_parse(args)
+    elif builtin == ".qg":
+        return _handle_builtin_qg(args)
     elif builtin == ".set":
         return _handle_builtin_set(args)
     print(
