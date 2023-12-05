@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import List
 from typing_extensions import override
 
+from .Config import Config
 from .QueryParser import IDConstant, NumericConstant, StringConstant
 from .QueryBackend import QueryBackend, QueryString
 from .QueryGraph import (
@@ -33,6 +34,10 @@ class SPARQLBackend(QueryBackend):
     def to_query(self, emit_labels: bool = False) -> SPARQLQuery:
         if emit_labels:
             raise AssertionError("unsupported option 'emit_labels' for SPARQLBackend")
+        type_info = str()
+        config = Config()
+        if config["sparql"]["emit_types"]:
+            type_info = f"{self._emit_type_info()}\n"
         SELECT = self._construct_select()
         WHERE = self._construct_where()
         # OPTIMIZE We could omit generating FILTER(True)
@@ -41,7 +46,7 @@ class SPARQLBackend(QueryBackend):
         if self.requires_aggregation():
             GROUP_BY = f"GROUP BY {self._construct_group_by()}"
         query = self._dedent_query(
-            f"""SELECT {SELECT}
+            f"""{type_info}SELECT {SELECT}
                 WHERE
                 {{
                     {WHERE}
@@ -138,7 +143,9 @@ class SPARQLBackend(QueryBackend):
                 self._column_by_node_id(column.aggregate.source.id_)
             )
             # TODO(jlscheerer) We should move Z_ to _sparql_name_for_column
-            aggregate_var = self._sparql_name_for_column(self._column_by_node_id(column.aggregate.target.id_))
+            aggregate_var = self._sparql_name_for_column(
+                self._column_by_node_id(column.aggregate.target.id_)
+            )
             return f"({column.aggregate.type_.name}({variable}) AS {aggregate_var})"
         return self._sparql_name_for_column(column)
 
@@ -160,6 +167,14 @@ class SPARQLBackend(QueryBackend):
             assert False
 
         return self.col2name[column]
+
+    def _emit_type_info(self) -> str:
+        types = []
+        for node in self.graph.nodes:
+            if isinstance(node, QueryGraphVariableNode):
+                column = self._sparql_name_for_column(self._column_by_node_id(node.id_))
+                types.append(f"#pragma:type {column} {node.variable.type_info()}")
+        return "\n".join(types)
 
     def _dedent_query(self, query: str) -> str:
         return inspect.cleandoc(query)

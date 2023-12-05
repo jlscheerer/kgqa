@@ -24,6 +24,12 @@ def run_and_rank(query: QueryString, wqg: QueryGraph):
             print("========== [SPARQL] ==========")
 
         sql = sparql2sql(query)
+
+        if Preferences()["print_sql"] == "true":
+            print("========== [SQL] ==========")
+            print(sql.value)
+            print("========== [SQL] ==========")
+
         db = Database()
         results, column_names = db.fetchall(sql.value, return_column_names=True)
     else:

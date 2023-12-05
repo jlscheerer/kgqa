@@ -9,6 +9,9 @@ psql:
   user: <<TODO_ADD_PSQL_USERNAME_HERE>>
   pwd: <<TODO_ADD_PSQL_PASSWORD_HERE>>
 
+sparql:
+  emit_types: true
+
 # Session History Information
 history:
   enabled: true

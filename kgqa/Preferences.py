@@ -7,6 +7,7 @@ DEFAULT_PREFERENCES_PATH = "./preferences.yaml"
 DEFAULT_PREFERENCES = {
     "backend": {"value": "SPARQL", "allowed": ["SPARQL"]},
     "print_sparql": {"value": "false", "allowed": ["true", "false"]},
+    "print_sql": {"value": "false", "allowed": ["true", "false"]},
 }
 
 

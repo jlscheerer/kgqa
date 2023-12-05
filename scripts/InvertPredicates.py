@@ -118,14 +118,16 @@ def _construct_inv_predicate_idx():
     db = Database()
 
     with yaspin(text="Constructing Indexes for claims_inv Table...") as sp:
-        db.execute(
-            "CREATE INDEX idx_claims_inv_entity_id ON claims_inv (entity_id);"
-        )
+        db.execute("CREATE INDEX idx_claims_inv_entity_id ON claims_inv (entity_id);")
         db.execute(
             "CREATE INDEX idx_claims_inv_datavalue_entity ON claims_inv (datavalue_entity);"
         )
+        db.execute("CREATE INDEX idx_claims_inv_property ON claims_inv (property);")
         db.execute(
-            "CREATE INDEX idx_claims_inv_property ON claims_inv (property);"
+            "CREATE INDEX idx_claims_inv_entity_id_property ON claims_inv (entity_id, property);"
+        )
+        db.execute(
+            "CREATE INDEX idx_claims_inv_property_datavalue_entity ON claims_inv (property, datavalue_entity);"
         )
 
         db.commit()
