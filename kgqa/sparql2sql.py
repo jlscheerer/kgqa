@@ -581,6 +581,7 @@ class SQLTranspiler:
         for type_ in self.query.type_info:
             if type_.variable == variable:
                 return self._sql_type(type_.type_)
+        print(variable)
         raise AssertionError
 
     def _sql_type(self, type_):
