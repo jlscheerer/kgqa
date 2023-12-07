@@ -9,7 +9,9 @@ from .QueryGraph import (
     QueryGraph,
     HeadVariableColumnInfo,
     PropertyColumnInfo,
+    QueryGraphConstantNode,
     QueryGraphEntityConstantNode,
+    QueryGraphVariableNode,
 )
 from .QueryParser import IDConstant, StringConstant
 from .SPARQLBackend import SPARQLQuery
@@ -67,7 +69,14 @@ def run_and_rank(query: QueryString, wqg: QueryGraph):
                     id
                 )  # id is actually the value of the aggregate in this case.
             else:
-                annotated_row.append(f"{db.get_pid_to_title(id)} ({id}) [f={score}]")
+                is_entity_id = True
+                # TODO(jlscheerer) Check if we actually have an entity_id or a different type.
+                if is_entity_id:
+                    annotated_row.append(
+                        f"{db.get_pid_to_title(id)} ({id}) [f={score}]"
+                    )
+                else:
+                    annotated_row.append(f"{id} [f={score}]")
             if score is not None:
                 row_score *= score
         max_row_score = max(max_row_score, row_score)
