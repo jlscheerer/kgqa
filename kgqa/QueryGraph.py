@@ -47,6 +47,9 @@ class QueryGraphIdGenerator:
 class QueryGraphNode:
     id_: QueryGraphId
 
+    def is_qualifier(self):
+        return False
+
     def mark_executable(self):
         pass
 
@@ -63,6 +66,14 @@ class QueryGraphPropertyNode(QueryGraphNode):
 
     def score(self, pid):
         return self.scores[self.pids.index(pid)]
+
+    def __eq__(self, other):
+        if not isinstance(other, QueryGraphPropertyNode):
+            return False
+        return self.id_ == other.id_
+
+    def __hash__(self):
+        return hash(self.id_.value)
 
 
 @dataclass
@@ -125,6 +136,21 @@ QueryGraphPropertyEdgeType = Union[
 @dataclass
 class QueryGraphPropertyEdge(QueryGraphEdge):
     property: QueryGraphPropertyEdgeType
+    qualifier: bool
+
+    def __init__(
+        self,
+        source: QueryGraphNode,
+        target: QueryGraphNode,
+        property: QueryGraphPropertyEdgeType,
+        qualifier: bool = False,
+    ):
+        self.property = property
+        self.qualifier = qualifier
+        super().__init__(source, target)
+
+    def is_qualifier(self):
+        return self.qualifier
 
 
 @dataclass
@@ -433,6 +459,7 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.arguments[1]],
                         property=arg2node[clause.predicate],  # type: ignore
+                        qualifier=clause.arguments[0].type_info() == "qualifier",
                     )
                 )
             elif isinstance(clause.predicate, IDConstant):
@@ -448,6 +475,7 @@ def query2aqg(pq: ParsedQuery) -> QueryGraph:
                         source=arg2node[clause.arguments[0]],
                         target=arg2node[clause.arguments[1]],
                         property=arg2node[clause.predicate],  # type: ignore
+                        qualifier=clause.arguments[0].type_info() == "qualifier",
                     )
                 )
             else:

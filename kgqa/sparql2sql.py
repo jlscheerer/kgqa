@@ -1,3 +1,4 @@
+from collections import defaultdict
 from enum import Enum, auto
 import inspect
 from typing import Generic, List, Set, Tuple, TypeVar, Union, Optional
@@ -9,7 +10,7 @@ from rdflib.plugins import sparql
 from rdflib import term
 
 from .QueryBackend import QueryString
-from .SPARQLBackend import SPARQLQuery
+from .SPARQLBackend import PropertyOccurrence, SPARQLQuery
 
 T = TypeVar("T")
 
@@ -58,7 +59,7 @@ class PName:
     """
 
     prefix: str
-    localname: str
+    localname: Optional[str]
 
     def __repr__(self):
         return f"{self.prefix}:{self.localname}"
@@ -88,12 +89,19 @@ Expression = Union[
     PName,
     AggregateExpression,
     "BinaryExpression",
+    "BuiltinExpression",
     List["Expression"],
 ]
 
 
 class BinaryExpressionType(Enum):
     IN = auto()
+    EQ = auto()
+
+
+class BuiltinExpressionType(Enum):
+    STRAFTER = auto()
+    STR = auto()
 
 
 @dataclass
@@ -101,6 +109,12 @@ class BinaryExpression:
     lhs: Expression
     op: BinaryExpressionType
     rhs: Expression
+
+
+@dataclass
+class BuiltinExpression:
+    type_: BuiltinExpressionType
+    args: List[Expression]
 
 
 @dataclass
@@ -159,7 +173,10 @@ def _parse_sparql_projection(projection) -> List[Union[Variable, NamedExpression
 
 
 def _parse_sparql_pname(pname) -> PName:
-    return PName(prefix=pname["prefix"], localname=pname["localname"])
+    return PName(
+        prefix=pname["prefix"],
+        localname=pname["localname"] if "localname" in pname else None,
+    )
 
 
 def _parse_triple_constituent(constituent) -> TripleConstituent:
@@ -201,7 +218,6 @@ def _parse_sparql_triples(triples) -> List[Triple]:
 
 
 def _parse_sparql_expr(expr) -> Expression:
-    # print(expr)
     if isinstance(expr, list):
         # We have a list of subexpressions
         return [_parse_sparql_expr(subexpr) for subexpr in expr]
@@ -209,6 +225,16 @@ def _parse_sparql_expr(expr) -> Expression:
         return _parse_sparql_variable(expr)
     elif isinstance(expr, term.Literal):
         return _parse_sparql_literal(expr)
+    elif expr.name == "Builtin_STRAFTER":
+        assert "arg1" in expr and "arg2" in expr
+        arg1 = _parse_sparql_expr(expr["arg1"])
+        arg2 = _parse_sparql_expr(expr["arg2"])
+
+        return BuiltinExpression(BuiltinExpressionType.STRAFTER, [arg1, arg2])
+    elif expr.name == "Builtin_STR":
+        assert "arg" in expr
+        arg = _parse_sparql_expr(expr["arg"])
+        return BuiltinExpression(BuiltinExpressionType.STR, [arg])
     elif expr.name in EXPR_AGGREGATE_TYPES:
         distinct = bool(expr["distinct"])
         var = _parse_sparql_expr(expr["vars"])
@@ -216,6 +242,8 @@ def _parse_sparql_expr(expr) -> Expression:
         return AggregateExpression(
             type_=expr.name[len("Aggregate_") :].upper(), distinct=distinct, var=var
         )
+    elif expr.name == "pname":
+        return _parse_sparql_pname(expr)
     elif set(expr.keys()) == {"prefix", "localname"}:
         return _parse_sparql_pname(expr)
     elif set(expr.keys()) == {"expr"}:
@@ -223,6 +251,8 @@ def _parse_sparql_expr(expr) -> Expression:
     elif set(expr.keys()) == {"expr", "op", "other"}:
         lhs = _parse_sparql_expr(expr["expr"])
         op = expr["op"]
+        if op == "=":
+            op = "EQ"
         rhs = _parse_sparql_expr(expr["other"])
         return BinaryExpression(lhs, BinaryExpressionType[op], rhs)
     # We have a list of subexpressions
@@ -295,18 +325,35 @@ def parse_sparql_query(query: str, assert_wiki=True) -> ParsedSPARQLQuery:
     return ParsedSPARQLQuery(projection, triples, filter, group_by, type_info=types)
 
 
+class VariableDescriptor(Enum):
+    WD = auto()
+    WDT = auto()
+    P = auto()
+    PS = auto()
+    PQ = auto()
+
+
+@dataclass
+class SQLTriple(Triple):
+    qualifier: Optional[Variable] = None
+
+
 class SQLTranspiler:
     query: ParsedSPARQLQuery
     base_table: str
 
-    def __init__(self, query: ParsedSPARQLQuery, base_table: str):
+    def __init__(self, query: ParsedSPARQLQuery, base_table: str, qualifier_table: str):
         self.query = query
         self.base_table = base_table
+        self.qualifier_table = qualifier_table
+        self._var_types: dict[str, PropertyOccurrence] = dict()
+        self._var_refs: dict[str, str] = dict()
+        self.triples: List[SQLTriple] = []
 
     def to_query(self) -> str:
-        SELECT = self._emit_sql_select()
-        FROM = self._emit_sql_from()
         WHERE = self._emit_sql_where()
+        FROM = self._emit_sql_from()
+        SELECT = self._emit_sql_select()
         GROUP_BY = None
         if self.query.group_by is not None:
             GROUP_BY = f"GROUP BY {self._emit_sql_group_by(self.query.group_by)}"
@@ -346,46 +393,95 @@ class SQLTranspiler:
         raise AssertionError(f"unsupported aggregate expression '{aggregate.type_}'")
 
     def _emit_sql_from(self) -> str:
-        if self.query.triples is not None:
-            return ", ".join(
-                [
-                    f"{self.base_table} c{index}"
-                    for index in range(len(self.query.triples))
-                ]
-            )
+        if self.triples is not None:
+            results: List[str] = []
+            for index, triple in enumerate(self.triples):
+                if self._is_qualifier_triple(triple):
+                    results.append(f"{self.qualifier_table} q{index}")
+                else:
+                    results.append(f"{self.base_table} c{index}")
+            return ", ".join(results)
         raise AssertionError("trying to convert SPARQL query without triples to SQL.")
 
     def _emit_sql_where(self) -> str:
         where_conds: List[str] = []
 
-        # add the triple condition constraints
-        if self.query.triples is not None:
-            for index, triple in enumerate(self.query.triples):
-                if not isinstance(triple.subj, Variable):
-                    assert isinstance(triple.subj, PName)
-                    where_conds.append(
-                        self._emit_eq_literal_constraint(
-                            f"c{index}.entity_id", triple.subj.localname
+        if self.query.filters is not None:
+            for filter in self.query.filters:
+                if (
+                    isinstance(filter, BinaryExpression)
+                    and filter.op == BinaryExpressionType.IN
+                ):
+                    if not isinstance(filter.lhs, Variable):
+                        raise AssertionError(
+                            f"unsupported left-hand side in 'IN' expression: {filter.lhs}"
                         )
-                    )
-                if not isinstance(triple.pred, Variable):
-                    assert isinstance(triple.pred, PName)
-                    where_conds.append(
-                        self._emit_eq_literal_constraint(
-                            f"c{index}.property", triple.pred.localname
+                    if not isinstance(filter.rhs, list):
+                        raise AssertionError(
+                            f"unsupported right-hand side in 'IN' expression: {filter.rhs}"
                         )
-                    )
-                if not isinstance(triple.obj, Variable):
-                    assert isinstance(triple.obj, PName)
-                    where_conds.append(
-                        self._emit_eq_literal_constraint(
-                            f"c{index}.datavalue_entity", triple.obj.localname
-                        )
-                    )
 
-        for var in self._collect_all_vars():
-            refs = self._find_references(var)
-            where_conds.append(self._emit_eq_constraint(refs))
+                    if not isinstance(filter.rhs[0], PName):
+                        raise AssertionError
+                    prefix = filter.rhs[0].prefix
+                    if prefix not in ["wdt", "wd", "p", "ps", "pq"]:
+                        raise AssertionError
+                    for element in filter.rhs:
+                        if not isinstance(element, PName) or element.prefix != prefix:
+                            raise AssertionError(
+                                f"unsupported expression in 'IN' expression: {element}"
+                            )
+                    self._var_types[
+                        filter.lhs.name
+                    ] = VariableDescriptor[  # type:ignore
+                        prefix.upper()
+                    ]
+                elif (
+                    isinstance(filter, BinaryExpression)
+                    and filter.op == BinaryExpressionType.EQ
+                ):
+                    lhs_var, lhs_type = self._parse_str_after(filter.lhs)
+                    rhs_var, rhs_type = self._parse_str_after(filter.rhs)
+                    assert (
+                        self._var_types[rhs_var.name]
+                        == VariableDescriptor[rhs_type.upper()]
+                    )
+                    self._var_types[lhs_var.name] = VariableDescriptor[lhs_type.upper()]
+                    self._var_refs[lhs_var.name] = rhs_var.name
+
+        p: dict[str, Triple] = dict()
+        ps: dict[str, Triple] = dict()
+
+        # condense the triples
+        if self.query.triples is not None:
+            for triple in self.query.triples:
+                if isinstance(triple.pred, PName):
+                    self.triples.append(SQLTriple(triple.subj, triple.pred, triple.obj))
+                    continue
+
+                assert isinstance(triple.pred, Variable)
+                var_type = self._var_types[triple.pred.name]
+                if var_type == VariableDescriptor.P:
+                    assert isinstance(triple.obj, Variable)
+                    assert triple.obj.name not in p
+                    p[triple.obj.name] = triple
+                    continue
+                elif var_type == VariableDescriptor.PS:
+                    assert isinstance(triple.subj, Variable)
+                    assert triple.subj.name not in ps
+                    ps[triple.subj.name] = triple
+                    continue
+
+                self.triples.append(SQLTriple(triple.subj, triple.pred, triple.obj))
+        assert p.keys() == ps.keys()
+        for claim in p.keys():
+            p_claim = p[claim]
+            ps_claim = ps[claim]
+            self.triples.append(
+                SQLTriple(
+                    p_claim.subj, p_claim.pred, ps_claim.obj, qualifier=ps_claim.subj  # type: ignore
+                )
+            )
 
         # add the filter conditions
         if self.query.filters is not None:
@@ -395,11 +491,10 @@ class SQLTranspiler:
                     assert isinstance(filter.value, bool)
                     assert filter.value
                     where_conds.append("true")
-                elif isinstance(filter, BinaryExpression):
-                    if filter.op != BinaryExpressionType.IN:
-                        raise AssertionError(
-                            f"unsupported binary expression in SPARQL query: {filter.op}"
-                        )
+                elif (
+                    isinstance(filter, BinaryExpression)
+                    and filter.op == BinaryExpressionType.IN
+                ):
                     if not isinstance(filter.lhs, Variable):
                         raise AssertionError(
                             f"unsupported left-hand side in 'IN' expression: {filter.lhs}"
@@ -408,26 +503,77 @@ class SQLTranspiler:
                         raise AssertionError(
                             f"unsupported right-hand side in 'IN' expression: {filter.rhs}"
                         )
-                    for element in filter.rhs:
-                        if not isinstance(element, PName) or element.prefix not in (
-                            "wdt",
-                            "wd",
-                        ):
-                            raise AssertionError(
-                                f"unsupported expression in 'IN' expression: {element}"
-                            )
+
+                    if not isinstance(filter.rhs[0], PName):
+                        raise AssertionError
+                    prefix = filter.rhs[0].prefix
                     id_list = ", ".join(
                         [f"'{element.localname}'" for element in filter.rhs]  # type: ignore
                     )
                     ref = self._find_references(filter.lhs)[0]
                     where_conds.append(f"{ref} IN ({id_list})")
+                elif (
+                    isinstance(filter, BinaryExpression)
+                    and filter.op == BinaryExpressionType.EQ
+                ):
+                    continue
                 else:
                     raise AssertionError(
                         f"unsupported filter in SPARQL query: {filter}"
                     )
 
+        # add the triple condition constraints
+        for index, triple in enumerate(self.triples):
+            if not isinstance(triple.subj, Variable):
+                assert isinstance(triple.subj, PName)
+                where_conds.append(
+                    self._emit_eq_literal_constraint(
+                        f"c{index}.entity_id", triple.subj.localname  # type: ignore
+                    )
+                )
+            if not isinstance(triple.pred, Variable):
+                assert isinstance(triple.pred, PName)
+                where_conds.append(
+                    self._emit_eq_literal_constraint(
+                        f"c{index}.property", triple.pred.localname  # type: ignore
+                    )
+                )
+            if not isinstance(triple.obj, Variable):
+                assert isinstance(triple.obj, PName)
+                where_conds.append(
+                    self._emit_eq_literal_constraint(
+                        f"c{index}.datavalue_entity", triple.obj.localname  # type: ignore
+                    )
+                )
+
+        for var in self._collect_all_vars():
+            refs = self._find_references(var)
+            constr = self._emit_eq_constraint(refs)
+            if constr == "True":
+                continue
+            where_conds.append(constr)
         assert len(where_conds) > 0
         return " AND ".join(where_conds)
+
+    def _parse_str_after(self, expr: Expression) -> Tuple[Variable, str]:
+        assert (
+            isinstance(expr, BuiltinExpression)
+            and expr.type_ == BuiltinExpressionType.STRAFTER
+        )
+        assert (
+            isinstance(expr.args[0], BuiltinExpression)
+            and expr.args[0].type_ == BuiltinExpressionType.STR
+        )
+        variable = expr.args[0].args[0]
+        assert isinstance(variable, Variable)
+
+        assert (isinstance(expr.args[1], BuiltinExpression)) and expr.args[
+            1
+        ].type_ == BuiltinExpressionType.STR
+        pname = expr.args[1].args[0]
+        assert isinstance(pname, PName) and pname.localname is None
+
+        return variable, pname.prefix
 
     def _sql_type_for_variable(self, variable: Variable):
         if len(self.query.type_info) == 0:
@@ -435,6 +581,7 @@ class SQLTranspiler:
         for type_ in self.query.type_info:
             if type_.variable == variable:
                 return self._sql_type(type_.type_)
+        print(variable)
         raise AssertionError
 
     def _sql_type(self, type_):
@@ -447,6 +594,8 @@ class SQLTranspiler:
             return "datavalue_date"
         elif type_ == "numeric":
             return "datavalue_quantity"
+        elif type_ == "qualifier":
+            return "id"
         raise AssertionError
 
     def _emit_sql_group_by(self, group_by: List[Variable]):
@@ -457,7 +606,13 @@ class SQLTranspiler:
 
     def _emit_eq_constraint(self, refs: List[str]) -> str:
         refs += [refs[0]]
-        cond = [f"{refs[index]} = {refs[index + 1]}" for index in range(len(refs) - 1)]
+        cond = [
+            f"{refs[index]} = {refs[index + 1]}"
+            for index in range(len(refs) - 1)
+            if refs[index] != refs[index + 1]
+        ]
+        if len(cond) == 0:
+            return "True"
         return " AND ".join(cond)
 
     def _collect_all_vars(self) -> Set[Variable]:
@@ -469,14 +624,15 @@ class SQLTranspiler:
                 assert isinstance(element.expression, AggregateExpression)
                 vars.add(element.expression.var)
 
-        if self.query.triples is not None:
-            for triple in self.query.triples:
-                if isinstance(triple.subj, Variable):
-                    vars.add(triple.subj)
-                if isinstance(triple.pred, Variable):
-                    vars.add(triple.pred)
-                if isinstance(triple.obj, Variable):
-                    vars.add(triple.obj)
+        for triple in self.triples:
+            if isinstance(triple.subj, Variable):
+                vars.add(triple.subj)
+            if isinstance(triple.pred, Variable):
+                vars.add(triple.pred)
+            if isinstance(triple.obj, Variable):
+                vars.add(triple.obj)
+            if triple.qualifier is not None:
+                vars.add(triple.qualifier)
 
         if self.query.filters is not None:
             for filter in self.query.filters:
@@ -492,25 +648,48 @@ class SQLTranspiler:
             raise AssertionError(
                 f"trying to find reference for variable ' {var}' with empty triples."
             )
-        for index, triple in enumerate(self.query.triples):
+        for index, triple in enumerate(self.triples):
+            prefix = "q" if self._is_qualifier_triple(triple) else "c"
             if var == triple.subj:
-                assert self._sql_type_for_variable(var) == "datavalue_entity"
-                refs.append(f"c{index}.entity_id")
+                if self._sql_type_for_variable(var) == "datavalue_entity":
+                    refs.append(f"{prefix}{index}.entity_id")
+                elif self._sql_type_for_variable(
+                    var
+                ) == "id" and self._is_qualifier_triple(triple):
+                    refs.append(f"q{index}.claim_id")
+                elif self._sql_type_for_variable(var) == "id":
+                    refs.append(f"c{index}.id")
+                else:
+                    assert False
             elif var == triple.pred:
-                refs.append(f"c{index}.property")
+                if self._is_qualifier_triple(triple):
+                    refs.append(f"{prefix}{index}.qualifier_property")
+                else:
+                    refs.append(f"{prefix}{index}.property")
             elif var == triple.obj:
-                refs.append(f"c{index}.{self._sql_type_for_variable(var)}")
+                refs.append(f"{prefix}{index}.{self._sql_type_for_variable(var)}")
+            elif var == triple.qualifier:
+                refs.append(f"c{index}.id")
         if len(refs) == 0:
             raise AssertionError(f"could not find reference for variable: {var}")
         return refs
 
+    def _is_qualifier_triple(self, triple: SQLTriple):
+        if not isinstance(triple.pred, Variable):
+            return False
+        return self._var_types[triple.pred.name] == VariableDescriptor.PQ
+
 
 def sparql2sql(
-    query: SPARQLQuery, base_table="claims_inv", assert_wiki=True
+    query: SPARQLQuery,
+    base_table="claims_inv",
+    qualifier_table="qualifiers",
+    assert_wiki=True,
 ) -> SQLQuery:
     return SQLQuery(
         value=SQLTranspiler(
             parse_sparql_query(query.value, assert_wiki=assert_wiki),
             base_table=base_table,
+            qualifier_table=qualifier_table,
         ).to_query()
     )
