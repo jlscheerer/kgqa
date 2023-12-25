@@ -174,6 +174,9 @@ class SPARQLBackend(QueryBackend):
             if isinstance(node, QueryGraphVariableNode):
                 column = self._sparql_name_for_column(self._column_by_node_id(node.id_))
                 types.append(f"#pragma:type {column} {node.variable.type_info()}")
+            elif isinstance(node, QueryGraphConstantNode):
+                column = self._sparql_name_for_column(self._column_by_node_id(node.id_))
+                types.append(f"#pragma:type {column} {node.constant.type_info()}")
         return "\n".join(types)
 
     def _dedent_query(self, query: str) -> str:
