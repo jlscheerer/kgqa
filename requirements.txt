@@ -12,3 +12,5 @@ pandas
 termcolor
 rdflib
 graphviz
+flask
+flask-cors
