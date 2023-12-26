@@ -100,9 +100,9 @@ def _handle_user_help() -> bool:
 
 def _handle_builtin_query(args: List[str]) -> bool:
     query = " ".join(args)
-    semantiq = PromptBuilder(template="QUERY_GENERATE").set("QUERY", query).execute()
-    print("Generated Query: ", semantiq)
-    _handle_user_query(semantiq)
+    QirK = PromptBuilder(template="QUERY_GENERATE").set("QUERY", query).execute()
+    print("Generated Query: ", QirK)
+    _handle_user_query(QirK)
     return True
 
 

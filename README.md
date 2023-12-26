@@ -1,8 +1,8 @@
 # kgqa
 
-> This repository contains the source code for `SemantIQ`, a system that allows formulating structured queries with loose natural language constraints, as well as for it's query language, `SemantIQ-QL`.
+> This repository contains the source code for `QirK`, a system that allows formulating structured queries with loose natural language constraints.
 
-## Querying via SemantIQ
+## Querying via QirK 
 
 Once the project is [set up](#getting-started), simply run [`kgqa.py`](kgqa.py).
 ```sh
