@@ -248,6 +248,13 @@ class Aggregation:
     def __repr__(self) -> str:
         return f"{self.type_.name}({self.var})"
 
+    @property
+    def name(self):
+        return f"{self.type_.name}({self.var.source_name()})"
+
+    def type_info(self):
+        return self.var.type_info()
+
 
 HeadItem = Union[Variable, Aggregation]
 

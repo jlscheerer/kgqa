@@ -19,6 +19,8 @@ def compute_similar_entity_ids(
     if num_qids is None:
         num_qids = config["NumTopQID"]
 
+def prepare_property(property):
+    return " ".join(property.split("_"))
 
 class FaissServer(RequestServer):
     debug_mode: bool = False
@@ -33,10 +35,10 @@ class FaissServer(RequestServer):
                 {"pids": ["P123"], "scores": [1.0], "labels": ["Debug Property P123"]}
             )
             return
-        predicate = data["property"]
+        property = prepare_property(data["property"])
         num_pids = data["num_pids"]
         ids, labels, scores = FaissIndexDirectory().properties.search(
-            predicate, num_pids
+            property, num_pids
         )
         self.write({"pids": ids, "scores": scores, "labels": labels})
 

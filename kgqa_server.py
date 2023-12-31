@@ -27,16 +27,23 @@ def retrieve_wiki_image(image):
     image = f"File:{image}"
     response = requests.get(f"https://en.wikipedia.org/w/api.php?action=query&titles={image}&prop=imageinfo&iiprop=url&format=json")
     wiki = next(iter(json.loads(response.text)["query"]["pages"].values()))
-    return wiki["imageinfo"][0]["url"]
+    try:
+        return wiki["imageinfo"][0]["url"]
+    except:
+        return None
 
 
 def parse_result(result):
+    if not isinstance(result, str):
+        # NOTE relevant for aggregates.
+        return result, result, result
     # TODO(jlscheerer) Hack. Clean this up!
-    match = re.findall("^(.*?) \\(((P|Q).*?)\\) \\[f=(.*?)\\]$", result)[0]
-    label, id_, score = match[0], match[1], match[3]
+    match = re.findall("^(.*?) \\((.*?)\\) \\[f=(.*?)\\]$", result)[0]
+    label, id_, score = match[0], match[1], match[2]
     return label, id_, score
 
 def format_key(key):
+    print("key", key)
     # TODO(jlscheerer) Hack. Clean this up!
     match = re.findall("^(.*?) \\((PID|QID)\\)", key)
     return match[0][0]
@@ -78,42 +85,72 @@ def handle_search_request(job):
         search_uuid_status[id_] = "Executing Query on Wikidata"
         results, columns = run_and_rank(qs, wqg)
 
-        assert len(pq.head.items) == 1
-        head = pq.head.items[0]
-        assert isinstance(head, Variable)
+        # assert len(pq.head.items) == 1
+        # head = pq.head.items[0]
+        # assert isinstance(head, Variable)
+        # result_type = head.type_info()
 
+        """
         target_column = None
         for column in columns:
             if column == head.name:
                 target_column = column
+        """
 
+        print(columns)
+        print(pq.head.items)
+
+        head_names = [head.name for head in pq.head.items]
         result_ids = []
         query_results = []
-        for row in results.to_dict(orient="records"):
-            label, rid, _ = parse_result(row[target_column])
-            score = float(row["Score"])
 
-            derivation = [f"{format_key(key)} ↦ {format_value(value)}" for key, value in row.items() if key not in [target_column, "Score"]]
+        print("head_names", head_names)
+
+        for row in results.to_dict(orient="records"):
+            score = float(row["Score"])
+            derivation = [f"{format_key(key)} ↦ {format_value(value)}" for key, value in row.items() if key not in [*head_names, "Score"]]
+
+            head_data = []
+            for head in pq.head.items:
+                result_type = head.type_info()
+                label, rid, _ = parse_result(row[head.name])
+                if result_type == "entity_id":
+                    query_id_ = rid
+                    title = label
+                    link = f"entity?id={rid}"
+                elif result_type == "date" or result_type == "string" or result_type == "numeric":
+                    # TODO(jlscheerer) Show unit or calendar type.
+                    title = rid
+                    query_id_ = "None"
+                    link = None
+                else:
+                    raise AssertionError
+                if result_type == "entity_id" and query_id_ is not None:
+                    result_ids.append(query_id_)
+
+                head_data.append({
+                    "variable": head.name,
+                    "type": result_type,
+                    "id": query_id_,
+                    "title": title,
+                    "link": link,
+                })
 
             query_results.append(
                 {
-                    "id": rid,
-                    "title": label,
-                    "score": f"{score:.02f}",
+                    "head": head_data,
                     "scoreColor": ["#E3EDD5", "#FBE7CD"][score < 1],
-                    #"image": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/President_Barack_Obama.jpg/192px-President_Barack_Obama.jpg",
+                    "score": f"{score:.02f}",
                     "opacity": int((score ** 3) * 100),
-                    "link": f"entity?id={rid}",
-                    # "derivation": "president_of ↦ head_of_government (0.71)",
                     "derivation": ", ".join(derivation)
                 }
             )
-            result_ids.append(rid)
         
         tok = time.time_ns()
         seconds = (tok - timestamp) / 10**9
 
         db = Database()
+        db._conn.set_isolation_level(0)
         result_ids = ", ".join([f"'{rid}'" for rid in result_ids])
 
         if len(result_ids) > 0:
@@ -139,10 +176,12 @@ def handle_search_request(job):
             descriptions = dict()
 
         for result in query_results:
-            if result["id"] in descriptions:
-                result["description"] = descriptions[result["id"]]
-            if result["id"] in images:
-                result["image"] = retrieve_wiki_image(images[result["id"]])
+            for item in result["head"]:
+                if item["id"] in descriptions:
+                    item["description"] = descriptions[item["id"]]
+                if item["id"] in images:
+                    if len(result_ids) < 50:
+                        item["image"] = retrieve_wiki_image(images[item["id"]])
 
         nodes = []
         for i, node in enumerate(wqg.nodes):
@@ -157,20 +196,29 @@ def handle_search_request(job):
                 data["data"]["label"] = f"'{node.constant.value}' (entity)"
             elif isinstance(node, QueryGraphPropertyConstantNode):
                 # TODO(jlscheerer) Maybe we can visualize these also?
-                data["data"]["label"] = f"'{node.property}' (property)"
+                data["data"]["label"] = f"'{node.constant}' (property)"
                 continue
             elif isinstance(node, QueryGraphConstantNode):
                 data["data"]["label"] = f"{node.constant.value} (const)"
             elif isinstance(node, QueryGraphGeneratedNode):
-                raise AssertionError
+                vcolumn = None
+                for column in wqg.columns:
+                    if column.node.id_ == node.id_:
+                        vcolumn = column
+                for column in wqg.vcolumns:
+                    if column.node.id_ == node.id_:
+                        vcolumn = column
+                data["data"]["label"] = f"{vcolumn} (syn.)"
             nodes.append(data)
 
         # networkx Graph used for layouting.
         G = nx.Graph()
+        for node in nodes:
+            G.add_node(node["id"])
 
         # TODO(jlscheerer) Display all the edges (aggregates and filters).
         edges = []
-        for i, edge in enumerate(wqg.edges):
+        for i, edge in enumerate(wqg.edges + wqg.aggregates):
             data = {"id": f"e{i}", "source": str(edge.source.id_.value), "target": str(edge.target.id_.value)}
             if isinstance(edge, QueryGraphPropertyEdge):
                 if isinstance(edge.property, QueryGraphPropertyNode):
@@ -180,7 +228,7 @@ def handle_search_request(job):
             elif isinstance(edge, QueryGraphFilter):
                 pass
             elif isinstance(edge, QueryGraphAggregate):
-                pass
+                data["label"] = edge.type_.name
             G.add_edge(data["source"], data["target"])
             edges.append(data)
 
@@ -188,8 +236,8 @@ def handle_search_request(job):
         for node in nodes:
             position = positions[node["id"]]
             node["position"] = {
-                "x": position[0] * 125,
-                "y": position[1] * 125
+                "x": position[0] * 200,
+                "y": position[1] * 200
             }
 
         # NOTE Hacky way to fix the layout in ReactFlow
@@ -201,12 +249,12 @@ def handle_search_request(job):
                 edge["target"] = source
 
         # TODO(jlscheerer) Visualize columns.
-
         graph = {
             "nodes": nodes,
             "edges": edges
         }
 
+        grouped_query_results = [{"derivation": key, "results": list(group)} for key, group in itertools.groupby(query_results, key=lambda x: x["derivation"])]
         search_uuid_results[id_] = {
             "uuid": id_,
             "query": query,
@@ -214,7 +262,7 @@ def handle_search_request(job):
             "graph": graph,
             "SPARQL": qs.value,
             "SQL": sql.value,
-            "results": query_results,
+            "results": grouped_query_results,
             "time": f"{seconds:.02f} seconds"
         }
     finally:

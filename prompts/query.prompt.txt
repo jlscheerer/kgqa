@@ -1,16 +1,25 @@
 Given a query as natural language generate a logical representation.
 For example:
  "what is the name of justin bieber brother?"
-becomes X: sibling(X, "Justin Bieber"); sex(X, "male")
+becomes X : sibling(X, "Justin Bieber"); sex(X, "male")
 or
 "who is married to barack obama?"
-becomes: X: married_to(X, "Barack Obama");
+becomes: X : married_to(X, "Barack Obama");
 or
 "who is the president of the USA?"
-becomes: X: head_of_government(X, "United States of America")
+becomes: X : head_of_government(X, "United States of America")
 or
 "what college did matt lauer attend?"
-becomes: X: attended_college(X, "Matt Lauer")
+becomes: X : attended_college(X, "Matt Lauer")
+or
+"when was jennifer lawrence born?"
+becomes: X : date_of_birth("Jennifer Lawrence", X / date)
+or
+"what is justin biebers official website?"
+becomes: X : official_website("Justin bieber", X / string)
+or
+"how high is mount everest?"
+becomes: X : height("Mount Everest", X / numeric)
 
 Now generate the logical representation for "${QUERY}"
 

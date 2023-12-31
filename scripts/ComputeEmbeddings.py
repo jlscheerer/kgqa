@@ -203,6 +203,66 @@ def compute_property_faiss_index():
 
         sp.green.ok("✔ ")
 
+def extract_db_property_aliases_en():
+    config = Config()
+    db = Database()
+
+    sql = """
+    SELECT id, value
+    FROM property_aliases_en
+    """
+
+    with yaspin(text="Extracting Property Aliases...") as sp:
+        property_ids, property_values = [], []
+        for id, value in db.fetchall(sql):
+            property_ids.append(id)
+            property_values.append(value)
+
+        ids_file = config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_IDS)
+        _dump_strs_to_file(ids_file, property_ids)
+
+        values_file = config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_LABELS)
+        _dump_strs_to_file(values_file, property_values)
+
+        sp.green.ok("✔ ")
+
+def compute_property_alias_embeddings():
+    config = Config()
+
+    with yaspin(text="Computing Property Alias Embeddings...") as sp:
+        values_file = config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_LABELS)
+        values = _read_strs_from_file(values_file)
+
+        embeddings = Transformer().encode(values)
+        embeddings_file = config.file_in_directory(
+            "embeddings", FILENAME_PROPERTY_ALIAS_EMBEDDINGS
+        )
+        np.save(embeddings_file, embeddings)
+
+        sp.green.ok("✔ ")
+
+def compute_property_alias_faiss_index():
+    config = Config()
+
+    with yaspin(text="Computing Faiss Index...") as sp:
+        embeddings = np.load(
+            config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_EMBEDDINGS)
+        )
+        ids = _preprocess_ids_to_np(
+            config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_IDS)
+        )
+        factory_settings = "Flat"
+        embeddings_idx = faiss.index_factory(
+            embeddings.shape[1], factory_settings, faiss.METRIC_INNER_PRODUCT
+        )
+        idx = faiss.IndexIDMap(embeddings_idx)
+        idx.add_with_ids(embeddings, ids)
+
+        faiss.write_index(
+            idx, config.file_in_directory("embeddings", FILENAME_PROPERTY_ALIAS_FAISS)
+        )
+
+        sp.green.ok("✔ ")
 
 def accept(options):
     # Label Embeddings
@@ -223,3 +283,13 @@ def accept(options):
 
     if not options.get("skip_property_faiss", False):
         compute_property_faiss_index()
+
+
+    # Property Alias Embeddings
+    if not options.get("skip_extract_alias_properties", False):
+        extract_db_property_aliases_en()
+    if not options.get("skip_alias_property_embeddings", False):
+        compute_property_alias_embeddings()
+
+    if not options.get("skip_alias_property_faiss", False):
+        compute_property_alias_faiss_index()
