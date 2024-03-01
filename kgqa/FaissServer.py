@@ -19,6 +19,11 @@ def compute_similar_entity_ids(
     if num_qids is None:
         num_qids = config["NumTopQID"]
 
+def prepare_property(property):
+    return " ".join(property.split("_"))
+
+_entity_cache: dict[Tuple[str, int], Tuple[any, any, any]] = dict()
+_property_cache: dict[Tuple[str, int], Tuple[any, any, any]] = dict()
 
 class FaissServer(RequestServer):
     debug_mode: bool = False
@@ -28,20 +33,30 @@ class FaissServer(RequestServer):
 
     @request_handler
     def compute_similar_properties(self, data):
+        global _property_cache
+
         if FaissServer.debug_mode:
             self.write(
                 {"pids": ["P123"], "scores": [1.0], "labels": ["Debug Property P123"]}
             )
             return
-        predicate = data["property"]
+        
+        property = prepare_property(data["property"])
         num_pids = data["num_pids"]
-        ids, labels, scores = FaissIndexDirectory().properties.search(
-            predicate, num_pids
-        )
+        key = (property, num_pids)
+        if key in _property_cache:
+            ids, labels, scores = _property_cache[key]
+        else:
+            ids, labels, scores = FaissIndexDirectory().properties.search(
+                property, num_pids, count_summary=3
+            )
+            _property_cache[key] = (ids, labels, scores)
         self.write({"pids": ids, "scores": scores, "labels": labels})
 
     @request_handler
     def compute_similar_entities(self, data):
+        global _entity_cache
+
         if FaissServer.debug_mode:
             self.write(
                 {"qids": ["Q123"], "scores": [1.0], "labels": ["Debug Entity Q123"]}
@@ -50,7 +65,14 @@ class FaissServer(RequestServer):
 
         entity = data["entity"]
         num_qids = data["num_qids"]
-        ids, labels, scores = FaissIndexDirectory().labels.search(entity, num_qids)
+        key = (entity, num_qids)
+        if key in _entity_cache:
+            ids, labels, scores = _entity_cache[key]
+        else:
+            ids, labels, scores = FaissIndexDirectory().labels.search(
+                entity, num_qids, count_summary=5
+            )
+            _entity_cache[key] = (ids, labels, scores)
         self.write({"qids": ids, "scores": scores, "labels": labels})
 
 

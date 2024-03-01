@@ -12,6 +12,7 @@ from tqdm import tqdm
 from .Constants import (
     FILENAME_FAISS_INDEX,
     FILENAME_PROPERTY_FAISS,
+    FILENAME_PROPERTY_ALIAS_FAISS
 )
 from .Singleton import Singleton
 from .Config import Config
@@ -38,7 +39,7 @@ ENTITY_POPULARITY_SCALE = 100
 PROPERTY_POPULARITY_SCALE = 250000
 
 # TODO(jlscheerer) Change this for properties/entities.
-NUM_RESULTS = 5
+NUM_RESULTS = 4
 
 def faiss_id_to_int(id):
     assert id[0] in ["P", "Q"]
@@ -108,7 +109,7 @@ class FaissIndex:
         self.type_ = type_
         self._index = index
 
-    def search(self, needle, count):
+    def search(self, needle, count, count_summary=NUM_RESULTS):
         # TODO(jlscheerer) Support batching queries.
         faiss_scores, faiss_ids = self._index.search(
             np.array([Transformer().encode(needle)]), count
@@ -160,9 +161,9 @@ class FaissIndex:
             results[row["id"]] = row["score"]
 
         return (
-            list(df["id"][:NUM_RESULTS]),
-            list(df["label"][:NUM_RESULTS]),
-            list(df["score"][:NUM_RESULTS]),
+            list(df["id"][:count_summary]),
+            list(df["label"][:count_summary]),
+            list(df["score"][:count_summary]),
         )
 
     def _popularity_score(self, popularity):
@@ -211,7 +212,5 @@ class FaissIndexDirectory(metaclass=Singleton):
         self.labels = FaissIndex("entity", ShardedFaissIndex(shards[:n_shards]))
         self.properties = FaissIndex(
             "property",
-            faiss.read_index(
-                config.file_in_directory("embeddings", FILENAME_PROPERTY_FAISS)
-            )
+            ShardedFaissIndex([FILENAME_PROPERTY_FAISS, FILENAME_PROPERTY_ALIAS_FAISS])
         )

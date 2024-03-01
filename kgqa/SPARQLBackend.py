@@ -98,7 +98,8 @@ WHERE
             else:
                 occurence = PropertyOccurrence.WDT
 
-            self._property_filter[edge.property].add(occurence)
+            if not isinstance(edge.property, QueryGraphPropertyConstantNode):
+                self._property_filter[edge.property].add(occurence)
             prop = self._construct_property_ref(edge.property, type_=occurence)
 
             prefix = "    " if index != 0 else ""
@@ -214,10 +215,10 @@ WHERE
         return " ".join(map(self._sparql_name_for_column, group_by))
 
     def _construct_pid_list(self, pids: List[str], prefix="wdt") -> str:
-        return ", ".join([f"{prefix}:{pid}" for pid in pids])
+        return ", ".join([f"{prefix}:{pid}" for pid in list(set(pids))])
 
     def _construct_qid_list(self, qids: List[str]) -> str:
-        return ", ".join([f"wd:{qid}" for qid in qids])
+        return ", ".join([f"wd:{qid}" for qid in list(set(qids))])
 
     def _construct_select_for_column(self, column: ColumnInfo) -> str:
         if isinstance(column, AggregateColumnInfo):
@@ -279,7 +280,8 @@ WHERE
             if isinstance(node, QueryGraphVariableNode):
                 column = self._sparql_name_for_column(self._column_by_node_id(node.id_))
                 types.append(f"#pragma:type {column} {node.variable.type_info()}")
-            elif isinstance(node, QueryGraphConstantNode):
+            elif isinstance(node, QueryGraphConstantNode) and not isinstance(node, QueryGraphPropertyConstantNode):
+                print(node)
                 column = self._sparql_name_for_column(self._column_by_node_id(node.id_))
                 types.append(f"#pragma:type {column} {node.constant.type_info()}")
         return "\n".join(types)

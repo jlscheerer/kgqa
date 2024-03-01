@@ -106,6 +106,10 @@ CREATE TABLE property_popularity AS (
 
 \copy aliases from 'csv/aliases.txt' DELIMITER E'\t'
 
+CREATE TABLE aliases_en AS (
+  SELECT id, value FROM aliases WHERE language = 'en'
+);
+
 \copy descriptions from 'csv/descriptions.txt' DELIMITER E'\t'
 
 CREATE TABLE descriptions_en AS (
@@ -129,6 +133,12 @@ CREATE MATERIALIZED VIEW qualifier_properties AS (
     WHERE q.claim_id = c.id AND c.inverse = False
 );
 
+CREATE TABLE property_aliases_en AS (
+  SELECT a.id, a.value
+  FROM aliases_en a, properties p
+  WHERE a.id = p.id
+);
+
 -- CREATE INDEXES --
 CREATE INDEX idx_qualifiers_claim_id ON qualifiers (claim_id);
 
@@ -140,3 +150,5 @@ CREATE INDEX idx_descriptions_en_id ON descriptions_en (id);
 CREATE INDEX idx_entity_popularity_id ON entity_popularity (id);
 
 CREATE INDEX idx_property_popularity_id ON property_popularity (id);
+
+-- TODO(jlscheerer) Document index creation for claims_inv --
