@@ -215,10 +215,10 @@ WHERE
         return " ".join(map(self._sparql_name_for_column, group_by))
 
     def _construct_pid_list(self, pids: List[str], prefix="wdt") -> str:
-        return ", ".join([f"{prefix}:{pid}" for pid in pids])
+        return ", ".join([f"{prefix}:{pid}" for pid in list(set(pids))])
 
     def _construct_qid_list(self, qids: List[str]) -> str:
-        return ", ".join([f"wd:{qid}" for qid in qids])
+        return ", ".join([f"wd:{qid}" for qid in list(set(qids))])
 
     def _construct_select_for_column(self, column: ColumnInfo) -> str:
         if isinstance(column, AggregateColumnInfo):

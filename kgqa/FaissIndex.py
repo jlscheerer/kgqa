@@ -109,7 +109,7 @@ class FaissIndex:
         self.type_ = type_
         self._index = index
 
-    def search(self, needle, count):
+    def search(self, needle, count, count_summary=NUM_RESULTS):
         # TODO(jlscheerer) Support batching queries.
         faiss_scores, faiss_ids = self._index.search(
             np.array([Transformer().encode(needle)]), count
@@ -161,9 +161,9 @@ class FaissIndex:
             results[row["id"]] = row["score"]
 
         return (
-            list(df["id"][:NUM_RESULTS]),
-            list(df["label"][:NUM_RESULTS]),
-            list(df["score"][:NUM_RESULTS]),
+            list(df["id"][:count_summary]),
+            list(df["label"][:count_summary]),
+            list(df["score"][:count_summary]),
         )
 
     def _popularity_score(self, popularity):

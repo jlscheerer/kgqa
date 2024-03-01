@@ -361,13 +361,13 @@ class SQLTranspiler:
                 f"""SELECT {SELECT}
                     FROM {FROM}
                     WHERE {WHERE}
-                    {GROUP_BY}"""
+                    {GROUP_BY};"""
             )
 
         return inspect.cleandoc(
             f"""SELECT {SELECT}
                 FROM {FROM}
-                WHERE {WHERE}"""
+                WHERE {WHERE};"""
         )
 
     def _emit_sql_select(self) -> str:
@@ -521,13 +521,6 @@ class SQLTranspiler:
                     raise AssertionError(
                         f"unsupported filter in SPARQL query: {filter}"
                     )
-
-
-        # NOTE disable inverse properties for now
-        #for index, triple in enumerate(self.triples):
-        #    if not self._is_qualifier_triple(triple):
-        #        where_conds.append(f"c{index}.inverse = false")
-
 
         # add the triple condition constraints
         for index, triple in enumerate(self.triples):

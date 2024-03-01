@@ -67,6 +67,8 @@ def handle_search_request(job):
             search_uuid_status[id_] = "Generating Intermediate Representation"
             QirK = PromptBuilder(template="QUERY_GENERATE").set("QUERY", query).execute()
 
+            print(f"Generated QirK: {QirK}")
+
             search_uuid_status[id_] = "Parsing Query"
             pq = QueryParser().parse(QirK)
 
@@ -139,9 +141,9 @@ def handle_search_request(job):
             query_results.append(
                 {
                     "head": head_data,
-                    "scoreColor": ["#E3EDD5", "#FBE7CD"][score < 1],
+                    "scoreColor": ["#E3EDD5", "#FBE7CD"][score < 0.65],
                     "score": f"{score:.02f}",
-                    "opacity": int((score ** 3) * 100),
+                    "opacity": int((score ** 0.25) * 100),
                     "derivation": ", ".join(derivation)
                 }
             )
@@ -224,7 +226,9 @@ def handle_search_request(job):
                 if isinstance(edge.property, QueryGraphPropertyNode):
                     data["label"] = f"'{edge.property.property}'"
                 elif isinstance(edge.property, QueryGraphPropertyConstantNode):
-                    data["label"] = f"'{edge.property.constant.value}'"
+                    if edge.property.constant.value == "P31":
+                        data["label"] = "instance of"    
+                    else: data["label"] = f"{edge.property.constant.value}"
             elif isinstance(edge, QueryGraphFilter):
                 pass
             elif isinstance(edge, QueryGraphAggregate):
@@ -265,6 +269,9 @@ def handle_search_request(job):
             "results": grouped_query_results,
             "time": f"{seconds:.02f} seconds"
         }
+    except Exception as err:
+        print(err)
+        print(QirK)
     finally:
         search_uuid_status[id_] = "Done"
 

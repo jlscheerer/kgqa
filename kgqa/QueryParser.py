@@ -347,8 +347,8 @@ class ParsedQuery:
             spo.append((clause.arguments[0], clause.predicate, clause.arguments[1]))
         return spo
 
-    def canonical(self) -> str:
-        return f"{QuerySerializer(self)}"
+    def canonical(self, with_types=False) -> str:
+        return f"{QuerySerializer(self, with_types=with_types)}"
 
 
 class QueryParserException(Exception):
@@ -366,8 +366,9 @@ class QueryParserExceptionWithNote(Exception):
 
 
 class QuerySerializer:
-    def __init__(self, pq: ParsedQuery):
+    def __init__(self, pq: ParsedQuery, with_types: bool):
         self.pq = pq
+        self.with_types = with_types
 
     def __str__(self):
         head = ", ".join([self._serialize_head_item(item) for item in self.pq.head])
@@ -386,13 +387,22 @@ class QuerySerializer:
     def _serialize_clause(self, clause: QueryClause):
         qprefix = str()
         if clause.qualifier is not None:
-            qprefix = f"{colored(clause.qualifier.name, 'magenta')} {colored('/', 'light_grey')} {colored(clause.qualifier.type_info(), 'light_grey')} := "
+            type_info = str()
+            if self.with_types:
+                type_info = f" {colored('/', 'light_grey')} {colored(clause.qualifier.type_info(), 'light_grey')}"
+            qprefix = f"{colored(clause.qualifier.name, 'magenta')}{type_info} := "
         arguments = [
             self._serialize_var(argument)
             if isinstance(argument, Variable)
             else self._serialize_const(argument)
             for argument in clause.arguments
         ]
+        if isinstance(clause.predicate, IDConstant) and clause.predicate.value == "P31":
+            # TODO(jlscheerer) This is a bit hacky, fix later.
+            consts = [argument for argument in clause.arguments if not isinstance(argument, Variable)]
+            args = [argument for argument in clause.arguments if isinstance(argument, Variable)]
+            assert len(consts) == 1 and len(args) == 1
+            return f"{qprefix}{consts[0].value}({', '.join([self._serialize_var(arg) for arg in args])})"
         return f"{qprefix}{clause.predicate.source_name()}({', '.join(arguments)})"
 
     def _serialize_filter(self, filter: QueryFilter):
@@ -405,7 +415,10 @@ class QuerySerializer:
         return f"{lhs} {filter.op.value} {rhs}"
 
     def _serialize_var(self, var):
-        return f"{colored(var.name, 'magenta')} {colored('/', 'light_grey')} {colored(var.type_info(), 'light_grey')}"
+        type_info = str()
+        if self.with_types:
+            type_info = f" {colored('/', 'light_grey')} {colored(var.type_info(), 'light_grey')}"
+        return f"{colored(var.name, 'magenta')}{type_info}"
 
     def _serialize_const(self, const):
         value = str()
@@ -420,7 +433,10 @@ class QuerySerializer:
             value = colored(f"!{const.value}", "green")
         else:
             raise AssertionError
-        return f"{value} {colored('/', 'light_grey')} {colored(const.type_info(), 'light_grey')}"
+        type_info = str()
+        if self.with_types:
+            type_info = f"{colored('/', 'light_grey')} {colored(const.type_info(), 'light_grey')}"
+        return f"{value}{type_info}"
 
 
 class QueryParser:

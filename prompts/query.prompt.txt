@@ -1,25 +1,24 @@
 Given a query as natural language generate a logical representation.
+For this you may only use the following type information: date, string numeric, and entity_id.
+You MUST strictly follow the format <Comma Separated Variables> : <Semicolon Separated Predicates>
 For example:
- "what is the name of justin bieber brother?"
-becomes X : sibling(X, "Justin Bieber"); sex(X, "male")
-or
-"who is married to barack obama?"
-becomes: X : married_to(X, "Barack Obama");
-or
-"who is the president of the USA?"
-becomes: X : head_of_government(X, "United States of America")
+"what is the name of justin bieber brother?"
+X : sibling(X, "Justin Bieber"); sex(X, "male")
 or
 "what college did matt lauer attend?"
-becomes: X : attended_college(X, "Matt Lauer")
+X : attended_college(X, "Matt Lauer")
 or
 "when was jennifer lawrence born?"
-becomes: X : date_of_birth("Jennifer Lawrence", X / date)
+X : date_of_birth("Jennifer Lawrence", X / date)
 or
 "what is justin biebers official website?"
-becomes: X : official_website("Justin bieber", X / string)
+X : official_website("Justin bieber", X / string)
 or
 "how high is mount everest?"
-becomes: X : height("Mount Everest", X / numeric)
+X : height("Mount Everest", X / numeric)
+or
+"who acted in the movie titanic?"
+X: actor(X, "Titanic")
 
 Now generate the logical representation for "${QUERY}"
 
